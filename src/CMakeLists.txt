@@ -152,7 +152,7 @@ file(GLOB HEADER_FILES
 	*.h
 )
 
-add_executable(ecwolf ${PLATFORM_EXE_FLAGS}
+add_executable(noah3d ${PLATFORM_EXE_FLAGS}
 	${HEADER_FILES}
 	${OPL_SOURCES}
 	g_shared/a_deathcam.cpp
@@ -283,9 +283,9 @@ add_executable(ecwolf ${PLATFORM_EXE_FLAGS}
 	${EXTRA_FILES}
 )
 
-add_dependencies(ecwolf lzma gdtoa revision_check)
-target_link_libraries(ecwolf ${EXTRA_LIBRARIES} ${SDL_LIBRARY} ${SDLMIXER_LIBRARY} ${ZLIB_LIBRARY} ${BZIP2_LIBRARIES} ${JPEG_LIBRARIES} lzma gdtoa)
-set_target_properties(ecwolf PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_DIR})
+add_dependencies(noah3d lzma gdtoa revision_check)
+target_link_libraries(noah3d ${EXTRA_LIBRARIES} ${SDL_LIBRARY} ${SDLMIXER_LIBRARY} ${ZLIB_LIBRARY} ${BZIP2_LIBRARIES} ${JPEG_LIBRARIES} lzma gdtoa)
+set_target_properties(noah3d PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_DIR})
 
 # Install
-install(TARGETS ecwolf BUNDLE DESTINATION ${OUTPUT_DIR} RUNTIME DESTINATION bin COMPONENT Runtime)
+install(TARGETS noah3d BUNDLE DESTINATION ${OUTPUT_DIR} RUNTIME DESTINATION bin COMPONENT Runtime)

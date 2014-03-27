@@ -443,7 +443,7 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 	if(config.GetSetting("BaseDataPaths") == NULL)
 	{
 		FString configDir = FileSys::GetDirectoryPath(FileSys::DIR_Configuration);
-		dataPaths = ".;$PROGDIR";
+		dataPaths = "$PROGDIR;.";
 
 		// On OS X our default config directory is ~/Library/Preferences which isn't a good place to put data at all.
 #if !defined(__APPLE__)
@@ -515,7 +515,7 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 
 	if(basefiles.Size() == 0)
 	{
-		I_Error("Can not find base game data. (*.wl6, *.wl1, *.sdm, *.sod)");
+		I_Error("Can not find base game data. (*.n3d)");
 	}
 
 	int pick = -1;

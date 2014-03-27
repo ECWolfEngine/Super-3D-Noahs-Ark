@@ -3,21 +3,21 @@
 
 #include "svnrevision.h"
 
-#define GAMENAME "ECWolf"
-#define GAMESIG "ECWOLF"
-#define BINNAME "ecwolf"
-#define MAIN_PK3 "ecwolf.pk3"
+#define GAMENAME "Noah3D"
+#define GAMESIG "NOAH3D"
+#define BINNAME "noah3d"
+#define MAIN_PK3 "noah3d.pk3"
 #if defined(__APPLE__) || defined(_WIN32)
 #define GAME_DIR GAMENAME
 #else
-#define GAME_DIR "ecwolf"
+#define GAME_DIR "noah3d"
 #endif
 #define DOTVERSIONSTR_NOREV "1.2.99999"
 #define DOTVERSIONSTR DOTVERSIONSTR_NOREV " (r" SVN_REVISION_STRING ")"
 #define SAVEPRODVER 0x001002FF // 0xMMMmmmrr in hex
 
 // Windows RC files have weird syntax so we need an unquoted version
-#define RCGAMENAME ECWolf
+#define RCGAMENAME Noah3D
 
 #define MINSAVEVER	1370923175ll
 // The following will be used as a less accurate fallback for non-version control builds

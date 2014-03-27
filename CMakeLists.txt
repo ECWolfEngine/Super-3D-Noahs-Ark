@@ -26,14 +26,14 @@ function( add_pk3 PK3_NAME PK3_DIR )
 
 	# Generate target name. Just use "pk3" for main pk3 target.
 	string( REPLACE "." "_" PK3_TARGET ${PK3_NAME} )
-	if( ${PK3_TARGET} STREQUAL "ecwolf_pk3" )
+	if( ${PK3_TARGET} STREQUAL "noah3d_pk3" )
 		set( PK3_TARGET "pk3" )
-	endif( ${PK3_TARGET} STREQUAL "ecwolf_pk3" )
+	endif( ${PK3_TARGET} STREQUAL "noah3d_pk3" )
 
 	if( NOT NO_GENERATOR_EXPRESSIONS )
 		add_custom_command( OUTPUT ${OUTPUT_DIR}/${PK3_NAME}
 			COMMAND ${ZIPDIR_EXE} -udf ${OUTPUT_DIR}/${PK3_NAME} ${PK3_DIR}
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OUTPUT_DIR}/${PK3_NAME} $<TARGET_FILE_DIR:ecwolf>/${PK3_NAME}
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OUTPUT_DIR}/${PK3_NAME} $<TARGET_FILE_DIR:noah3d>/${PK3_NAME}
 			DEPENDS zipdir )
 	else( NOT NO_GENERATOR_EXPRESSIONS )
 		add_custom_command( OUTPUT ${OUTPUT_DIR}/${PK3_NAME}
@@ -52,7 +52,7 @@ set(OUTPUT_DIR ${CMAKE_BINARY_DIR} CACHE PATH "Directory in which to build ECWol
 
 set(LZMA_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lzma/C")
 
-option(GPL "Build GPL edition")
+option(GPL "Build GPL edition" ON)
 
 option(INTERNAL_ZLIB "Force build with internal zlib" OFF)
 option(INTERNAL_BZIP2 "Force build with internal bzip2" OFF)
