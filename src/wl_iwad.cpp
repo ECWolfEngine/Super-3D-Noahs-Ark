@@ -490,6 +490,7 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 	}
 	while(split != 0);
 
+#if 0
 	LookForGameData(datawadRes, basefiles, "/usr/local/share/games/wolf3d");
 
 	// Look for a steam install. (Basically from ZDoom)
@@ -506,6 +507,7 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 		for(unsigned int i = 0;i < countof(steamDirs);++i)
 			LookForGameData(datawadRes, basefiles, FileSys::GetSteamPath(steamDirs[i].app) + steamDirs[i].dir);
 	}
+#endif
 
 	delete datawadRes;
 
@@ -562,6 +564,10 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 	{
 		wadfiles.Push(base.Path[i]);
 	}
+	if(!useProgdir)
+		wadfiles.Push("noah3d.wad");
+	else
+		wadfiles.Push(progdir + "/noah3d.wad");
 
 	NumIWads = base.Path.Size();
 }

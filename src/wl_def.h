@@ -336,6 +336,7 @@ struct ControlScheme
 		int			mouse;
 		int			*axis;
 		bool		negative;
+		bool		visible;
 };
 
 extern ControlScheme controlScheme[];

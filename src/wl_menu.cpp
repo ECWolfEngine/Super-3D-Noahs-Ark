@@ -453,7 +453,8 @@ void CreateMenus()
 	controls.showControlHeaders(true);
 	for(int i = 0;controlScheme[i].button != bt_nobutton;i++)
 	{
-		controls.addItem(new ControlMenuItem(controlScheme[i]));
+		if(controlScheme[i].visible)
+			controls.addItem(new ControlMenuItem(controlScheme[i]));
 	}
 
 	const char* rotateOptions[] = { language["STR_AMROTATEOFF"], language["STR_AMROTATEON"], language["STR_AMROTATEOVERLAY"] };
