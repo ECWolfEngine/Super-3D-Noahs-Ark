@@ -42,13 +42,13 @@ static	bool		US_Started;
 
 HighScore	Scores[MaxScores] =
 			{
-				{"id software-'92",10000,"1",""},
-				{"Adrian Carmack",10000,"1",""},
-				{"John Carmack",10000,"1",""},
-				{"Kevin Cloud",10000,"1",""},
-				{"Tom Hall",10000,"1",""},
-				{"John Romero",10000,"1",""},
-				{"Jay Wilbur",10000,"1",""},
+				{"Noah",10000,"1-2",""},
+				{"Eve",10000,"1-2",""},
+				{"Moses",10000,"1-2",""},
+				{"Ruth",10000,"1-2",""},
+				{"Adam",10000,"1-2",""},
+				{"Deborah",10000,"1-2",""},
+				{"Abraham",10000,"1-2",""},
 			};
 
 //	Internal routines

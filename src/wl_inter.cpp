@@ -810,10 +810,11 @@ void DrawHighScores (void)
 
 	ClearMScreen ();
 
+	// NOAH3D: Adjusted coordinates for greater accuracy
 	FTexture *highscores = TexMan("HGHSCORE");
 	DrawStripes (10);
 	if(highscores->GetScaledWidth() < 320)
-		VWB_DrawGraphic(highscores, 160-highscores->GetScaledWidth()/2, 0, MENU_TOP);
+		VWB_DrawGraphic(highscores, 136-highscores->GetScaledWidth()/2, 0, MENU_TOP);
 	else
 		VWB_DrawGraphic(highscores, 0, 0, MENU_TOP);
 
@@ -821,20 +822,20 @@ void DrawHighScores (void)
 	static FTextureID texLevel = TexMan.CheckForTexture("M_LEVEL", FTexture::TEX_Any);
 	static FTextureID texScore = TexMan.CheckForTexture("M_SCORE", FTexture::TEX_Any);
 	if(texName.isValid())
-		VWB_DrawGraphic(TexMan(texName), 16, 68);
+		VWB_DrawGraphic(TexMan(texName), 32, 68);
 	if(texLevel.isValid())
-		VWB_DrawGraphic(TexMan(texLevel), 194 - TexMan(texLevel)->GetScaledWidth()/2, 68);
+		VWB_DrawGraphic(TexMan(texLevel), 168, 68);
 	if(texScore.isValid())
-		VWB_DrawGraphic(TexMan(texScore), 240, 68);
+		VWB_DrawGraphic(TexMan(texScore), 256, 68);
 
 	for (i = 0, s = Scores; i < MaxScores; i++, s++)
 	{
-		PrintY = 76 + ((font->GetHeight() + 3) * i);
+		PrintY = 76 + ((font->GetHeight() + 6) * i);
 
 		//
 		// name
 		//
-		PrintX = 16;
+		PrintX = 32;
 		US_Print (font, s->name, gameinfo.FontColors[GameInfo::HIGHSCORES]);
 
 		//
@@ -842,7 +843,7 @@ void DrawHighScores (void)
 		//
 		buffer.Format("%s", s->completed.GetChars());
 		VW_MeasurePropString (font, buffer, w, h);
-		PrintX = 194 - w;
+		PrintX = 192 - w;
 
 		bool drawNumber = true;
 		if (s->graphic[0])
@@ -853,7 +854,7 @@ void DrawHighScores (void)
 				FTexture *tex = TexMan(graphic);
 
 				drawNumber = false;
-				VWB_DrawGraphic (tex, 194 - tex->GetScaledWidth(), PrintY - 1, MENU_CENTER);
+				VWB_DrawGraphic (tex, 192 - tex->GetScaledWidth(), PrintY - 1, MENU_CENTER);
 			}
 		}
 
@@ -865,7 +866,7 @@ void DrawHighScores (void)
 		//
 		buffer.Format("%d", s->score);
 		VW_MeasurePropString (font, buffer, w, h);
-		PrintX = 292 - w;
+		PrintX = 288 - w;
 		US_Print (font, buffer, gameinfo.FontColors[GameInfo::HIGHSCORES]);
 	}
 
@@ -926,7 +927,7 @@ void CheckHighScore (int32_t score, const LevelInfo *levelInfo)
 		// got a high score
 		//
 		PrintY = 76 + ((font->GetHeight() + 3) * n);
-		PrintX = 16;
+		PrintX = 32;
 		US_LineInput (font,PrintX, PrintY, Scores[n].name, 0, true, MaxHighName, 130, BKGDCOLOR, CR_WHITE);
 	}
 	else
