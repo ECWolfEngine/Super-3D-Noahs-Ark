@@ -41,7 +41,8 @@ endif(GPL)
 
 find_package(SDL REQUIRED)
 find_package(SDL_mixer REQUIRED)
-include_directories(${SDLMIXER_INCLUDE_DIR} ${SDL_INCLUDE_DIR} ${ZLIB_INCLUDE_DIR} ${BZIP2_INCLUDE_DIR} ${JPEG_INCLUDE_DIR})
+# Noah3D - No jpeg
+include_directories(${SDLMIXER_INCLUDE_DIR} ${SDL_INCLUDE_DIR} ${ZLIB_INCLUDE_DIR} ${BZIP2_INCLUDE_DIR})
 
 check_function_exists(stricmp STRICMP_EXISTS)
 check_function_exists(strnicmp STRNICMP_EXISTS)
@@ -105,7 +106,7 @@ if(WIN32)
 elseif(APPLE)
 	set(NO_GTK ON)
 else(WIN32)
-	option( NO_GTK "Disable GTK+ dialogs (Not applicable to Windows)" )
+	option( NO_GTK "Disable GTK+ dialogs (Not applicable to Windows)" ON )
 
 	# Use GTK+ for the IWAD picker, if available.
 	if( NOT NO_GTK )
@@ -176,12 +177,13 @@ add_executable(noah3d ${PLATFORM_EXE_FLAGS}
 	resourcefiles/file_audiot.cpp
 	resourcefiles/file_directory.cpp
 	resourcefiles/file_gamemaps.cpp
-	resourcefiles/file_grp.cpp
-	resourcefiles/file_pak.cpp
-	resourcefiles/file_rff.cpp
-	resourcefiles/file_rtl.cpp
+	# Noah3D: Disable unneeded archive support
+	#resourcefiles/file_grp.cpp
+	#resourcefiles/file_pak.cpp
+	#resourcefiles/file_rff.cpp
+	#resourcefiles/file_rtl.cpp
 	resourcefiles/file_lump.cpp
-	resourcefiles/file_macbin.cpp
+	#resourcefiles/file_macbin.cpp
 	resourcefiles/file_vgagraph.cpp
 	resourcefiles/file_vswap.cpp
 	resourcefiles/file_wad.cpp
@@ -190,23 +192,23 @@ add_executable(noah3d ${PLATFORM_EXE_FLAGS}
 	sfmt/SFMT.cpp
 	textures/anim_switches.cpp
 	textures/animations.cpp
-	textures/automaptexture.cpp
+	#textures/automaptexture.cpp
 	textures/bitmap.cpp
-	textures/ddstexture.cpp
+	#textures/ddstexture.cpp
 	textures/emptytexture.cpp
 	textures/flattexture.cpp
-	textures/imgztexture.cpp
-	textures/jpegtexture.cpp
+	#textures/imgztexture.cpp
+	#textures/jpegtexture.cpp Noah3D - No jpeg
 	textures/multipatchtexture.cpp
 	textures/patchtexture.cpp
-	textures/pcxtexture.cpp
+	#textures/pcxtexture.cpp
 	textures/pngtexture.cpp
 	textures/rawpagetexture.cpp
-	textures/rottflattexture.cpp
+	#textures/rottflattexture.cpp
 	textures/solidtexture.cpp
 	textures/texture.cpp
 	textures/texturemanager.cpp
-	textures/tgatexture.cpp
+	#textures/tgatexture.cpp
 	textures/warptexture.cpp
 	textures/wolfrawtexture.cpp
 	textures/wolfshapetexture.cpp
@@ -284,7 +286,8 @@ add_executable(noah3d ${PLATFORM_EXE_FLAGS}
 )
 
 add_dependencies(noah3d lzma gdtoa revision_check)
-target_link_libraries(noah3d ${EXTRA_LIBRARIES} ${SDL_LIBRARY} ${SDLMIXER_LIBRARY} ${ZLIB_LIBRARY} ${BZIP2_LIBRARIES} ${JPEG_LIBRARIES} lzma gdtoa)
+# Noah3D - No jpeg
+target_link_libraries(noah3d ${EXTRA_LIBRARIES} ${SDL_LIBRARY} ${SDLMIXER_LIBRARY} ${ZLIB_LIBRARY} ${BZIP2_LIBRARIES} lzma gdtoa)
 set_target_properties(noah3d PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_DIR})
 
 # Install

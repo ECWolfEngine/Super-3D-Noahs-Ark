@@ -65,18 +65,19 @@ void FTexture::InitGrayMap()
 	}
 }
 
-FTexture *IMGZTexture_TryCreate(FileReader &, int lumpnum);
+//FTexture *IMGZTexture_TryCreate(FileReader &, int lumpnum);
 FTexture *PNGTexture_TryCreate(FileReader &, int lumpnum);
-FTexture *JPEGTexture_TryCreate(FileReader &, int lumpnum);
-FTexture *DDSTexture_TryCreate(FileReader &, int lumpnum);
-FTexture *PCXTexture_TryCreate(FileReader &, int lumpnum);
-FTexture *TGATexture_TryCreate(FileReader &, int lumpnum);
+// Noah3D: No jpeg
+//FTexture *JPEGTexture_TryCreate(FileReader &, int lumpnum);
+//FTexture *DDSTexture_TryCreate(FileReader &, int lumpnum);
+//FTexture *PCXTexture_TryCreate(FileReader &, int lumpnum);
+//FTexture *TGATexture_TryCreate(FileReader &, int lumpnum);
 FTexture *RawPageTexture_TryCreate(FileReader &, int lumpnum);
-FTexture *RottFlatTexture_TryCreate(FileReader &, int lumpnum);
+//FTexture *RottFlatTexture_TryCreate(FileReader &, int lumpnum);
 FTexture *FlatTexture_TryCreate(FileReader &, int lumpnum);
 FTexture *PatchTexture_TryCreate(FileReader &, int lumpnum);
 FTexture *EmptyTexture_TryCreate(FileReader &, int lumpnum);
-FTexture *AutomapTexture_TryCreate(FileReader &, int lumpnum);
+//FTexture *AutomapTexture_TryCreate(FileReader &, int lumpnum);
 FTexture *WolfRawTexture_TryCreate(FileReader &, int lumpnum);
 FTexture *WolfShapeTexture_TryCreate(FileReader &, int lumpnum);
 
@@ -86,20 +87,20 @@ FTexture *WolfShapeTexture_TryCreate(FileReader &, int lumpnum);
 FTexture * FTexture::CreateTexture (int lumpnum, int usetype)
 {
 	static TexCreateInfo CreateInfo[]={
-		{ IMGZTexture_TryCreate,		TEX_Any },
+		//{ IMGZTexture_TryCreate,		TEX_Any },
 		{ PNGTexture_TryCreate,			TEX_Any },
-		{ JPEGTexture_TryCreate,		TEX_Any },
-		{ DDSTexture_TryCreate,			TEX_Any },
-		{ PCXTexture_TryCreate,			TEX_Any },
-		{ TGATexture_TryCreate,			TEX_Any },
+		//{ JPEGTexture_TryCreate,		TEX_Any },
+		//{ DDSTexture_TryCreate,			TEX_Any },
+		//{ PCXTexture_TryCreate,			TEX_Any },
+		//{ TGATexture_TryCreate,			TEX_Any },
 		{ RawPageTexture_TryCreate,		TEX_MiscPatch },
-		{ RottFlatTexture_TryCreate,	TEX_Flat },
+		//{ RottFlatTexture_TryCreate,	TEX_Flat },
 		{ FlatTexture_TryCreate,		TEX_Flat },
 		{ PatchTexture_TryCreate,		TEX_Any },
 		{ WolfShapeTexture_TryCreate,	TEX_Any },
 		{ WolfRawTexture_TryCreate,		TEX_MiscPatch },
 		{ EmptyTexture_TryCreate,		TEX_Any },
-		{ AutomapTexture_TryCreate,		TEX_MiscPatch },
+		//{ AutomapTexture_TryCreate,		TEX_MiscPatch },
 	};
 
 	if (lumpnum == -1) return NULL;

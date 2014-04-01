@@ -56,11 +56,12 @@ option(GPL "Build GPL edition" ON)
 
 option(INTERNAL_ZLIB "Force build with internal zlib" OFF)
 option(INTERNAL_BZIP2 "Force build with internal bzip2" OFF)
-option(INTERNAL_JPEG "Force build with internal libjpeg" OFF)
+# Noah3D - No jpeg
+#option(INTERNAL_JPEG "Force build with internal libjpeg" OFF)
 
 find_package(ZLIB)
 find_package(BZip2)
-find_package(JPEG)
+#find_package(JPEG)
 
 if(NOT ZLIB_FOUND OR INTERNAL_ZLIB)
 	set(ZLIB_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/zlib)
@@ -75,12 +76,12 @@ if(NOT BZIP2_FOUND OR INTERNAL_BZIP2)
 	set(BZIP2_LIBRARIES bz2)
 endif(NOT BZIP2_FOUND OR INTERNAL_BZIP2)
 
-if(NOT JPEG_FOUND OR INTERNAL_JPEG)
-	set(JPEG_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/jpeg-6b)
-	add_subdirectory(jpeg-6b)
-	set(JPEG_LIBRARIES jpeg)
-	set(JPEG_LIBRARY jpeg)
-endif(NOT JPEG_FOUND OR INTERNAL_JPEG)
+#if(NOT JPEG_FOUND OR INTERNAL_JPEG)
+#	set(JPEG_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/jpeg-6b)
+#	add_subdirectory(jpeg-6b)
+#	set(JPEG_LIBRARIES jpeg)
+#	set(JPEG_LIBRARY jpeg)
+#endif(NOT JPEG_FOUND OR INTERNAL_JPEG)
 
 if(MSVC)
 	add_definitions(-D_CRT_SECURE_NO_DEPRECATE -D_CRT_NONSTDC_NO_DEPRECATE)

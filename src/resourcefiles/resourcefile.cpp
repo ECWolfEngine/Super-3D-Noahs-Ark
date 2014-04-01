@@ -248,9 +248,10 @@ int FResourceLump::ReleaseCache()
 typedef FResourceFile * (*CheckFunc)(const char *filename, FileReader *file, bool quiet);
 
 FResourceFile *CheckWad(const char *filename, FileReader *file, bool quiet);
-FResourceFile *CheckGRP(const char *filename, FileReader *file, bool quiet);
-FResourceFile *CheckRFF(const char *filename, FileReader *file, bool quiet);
-FResourceFile *CheckPak(const char *filename, FileReader *file, bool quiet);
+// Noah3D: Disable needless file support
+//FResourceFile *CheckGRP(const char *filename, FileReader *file, bool quiet);
+//FResourceFile *CheckRFF(const char *filename, FileReader *file, bool quiet);
+//FResourceFile *CheckPak(const char *filename, FileReader *file, bool quiet);
 FResourceFile *CheckZip(const char *filename, FileReader *file, bool quiet);
 FResourceFile *Check7Z(const char *filename, FileReader *file, bool quiet);
 FResourceFile *CheckLump(const char *filename, FileReader *file, bool quiet);
@@ -259,11 +260,11 @@ FResourceFile *CheckVGAGraph(const char *filename, FileReader *file, bool quiet)
 FResourceFile *CheckVSwap(const char *filename, FileReader *file, bool quiet);
 FResourceFile *CheckAudiot(const char *filename, FileReader *file, bool quiet);
 FResourceFile *CheckGamemaps(const char *filename, FileReader *file, bool quiet);
-FResourceFile *CheckMacBin(const char *filename, FileReader *file, bool quiet);
-FResourceFile *CheckRtl(const char *filename, FileReader *file, bool quiet);
+//FResourceFile *CheckMacBin(const char *filename, FileReader *file, bool quiet);
+//FResourceFile *CheckRtl(const char *filename, FileReader *file, bool quiet);
 
 #define COUNTOF_FUNCS 13
-static CheckFunc funcs[COUNTOF_FUNCS] = { CheckWad, CheckZip, Check7Z, CheckPak, CheckGRP, CheckRFF, CheckRtl, CheckMacBin, CheckAudiot, CheckVGAGraph, CheckVSwap, CheckGamemaps, CheckLump };
+static CheckFunc funcs[COUNTOF_FUNCS] = { CheckWad, CheckZip, Check7Z, CheckAudiot, CheckVGAGraph, CheckVSwap, CheckGamemaps, CheckLump };
 
 FResourceFile *FResourceFile::OpenResourceFile(const char *filename, FileReader *file, bool quiet)
 {
