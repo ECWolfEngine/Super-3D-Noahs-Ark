@@ -195,7 +195,7 @@ void PollKeyboardButtons (void)
 	{
 		// HACK
 		bool jam[512] = {false};
-		bool jamall = (Paused & 2); // Paused for automap
+		bool jamall = !!(Paused & 2); // Paused for automap
 
 		for(int i = 0;jamall ? amControlScheme[i].button != bt_nobutton : amControlScheme[i].button <= bt_zoomout;i++)
 		{
@@ -313,20 +313,20 @@ void PollMouseMove (void)
 	mousexmove -= screenWidth / 2;
 	mouseymove -= screenHeight / 2;
 
-	controlx += mousexmove * 20 / (21 - mouseadjustment);
-	if(!mouseyaxisdisabled)
-		controly += mouseymove * 40 / (21 - mouseadjustment);
-	else if(mouselook)
+	controlx += mousexmove * 20 / (21 - mousexadjustment);
+	if(mouselook)
 	{
 		if(players[0].ReadyWeapon && players[0].ReadyWeapon->fovscale > 0)
-			mouseymove = mouseymove*fabs(players[0].ReadyWeapon->fovscale);
+			mouseymove = xs_ToInt(mouseymove*fabs(players[0].ReadyWeapon->fovscale));
 
-		players[0].mo->pitch += mouseymove * (ANGLE_1 / (21 - mouseadjustment));
+		players[0].mo->pitch += mouseymove * (ANGLE_1 / (21 - mouseyadjustment));
 		if(players[0].mo->pitch+ANGLE_180 > ANGLE_180+56*ANGLE_1)
 			players[0].mo->pitch = 56*ANGLE_1;
 		else if(players[0].mo->pitch+ANGLE_180 < ANGLE_180-56*ANGLE_1)
 			players[0].mo->pitch = ANGLE_NEG(56*ANGLE_1);
 	}
+	else if(!mouseyaxisdisabled)
+		controly += mouseymove * 40 / (21 - mouseyadjustment);
 }
 
 
@@ -347,7 +347,7 @@ void PollJoystickMove (void)
 			// Scale to -100 - 100
 			const int axis = (((IN_GetJoyAxis((controlScheme[i].joystick-32)>>1))+1)*100)>>15;
 			if((controlScheme[i].joystick&1) ^ (axis < 0))
-				*controlScheme[i].axis += controlScheme[i].negative ? -ABS(axis) : ABS(axis);
+				*controlScheme[i].axis += controlScheme[i].negative ? -abs(axis) : abs(axis);
 		}
 	}
 }

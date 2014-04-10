@@ -108,7 +108,8 @@ void    Quit (const char *error,...);
 
 bool	startgame;
 bool	loadedgame;
-int		mouseadjustment;
+int		mousexadjustment;
+int     mouseyadjustment;
 
 //
 // Command line parameter variables
@@ -147,7 +148,7 @@ void NewGame (int difficulty, const FString &map, bool displayBriefing, const Cl
 	levelInfo = &LevelInfo::Find(map);
 
 	if(displayBriefing)
-		EnterText(levelInfo->Cluster);	
+		EnterText(levelInfo->Cluster);
 
 	// Clear LevelRatios
 	LevelRatios.killratio = LevelRatios.secretsratio = LevelRatios.treasureratio =
@@ -331,7 +332,7 @@ void DoJukebox(void)
 		else
 			musicMenu.addItem(new MenuItem(language[langString], ChangeMusic));
 		songList.Push(Wads.GetLumpFullName(i));
-		
+
 	}
 	musicMenu.show();
 	return;
@@ -575,7 +576,8 @@ static void SetViewSize (unsigned int screenWidth, unsigned int screenHeight)
 	viewheight = height&~1;
 	centerx = viewwidth/2-1;
 	centerxwide = AspectCorrection[r_ratio].isWide ? CorrectWidthFactor(centerx) : centerx;
-	shootdelta = viewwidth/10;
+	// This should allow shooting within 9 degrees, but it's not perfect.
+	shootdelta = ((viewwidth<<FRACBITS)/AspectCorrection[r_ratio].viewGlobal)/10;
 	if((unsigned) viewheight == screenHeight)
 		viewscreenx = viewscreeny = screenofs = 0;
 	else
