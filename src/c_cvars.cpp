@@ -94,21 +94,29 @@ void FinalReadConfig()
 
 void ReadConfig(void)
 {
+#if defined(_WIN32) || defined(__APPLE__)
 	config.CreateSetting("ForceGrabMouse", false);
+#else
+	config.CreateSetting("ForceGrabMouse", true);
+#endif
 	config.CreateSetting("MouseEnabled", 1);
 	config.CreateSetting("JoystickEnabled", 0);
-	config.CreateSetting("ViewSize", 19);
-	config.CreateSetting("MouseXAdjustment", 5);
-	config.CreateSetting("MouseYAdjustment", 5);
+	config.CreateSetting("ViewSize", 20);
+	config.CreateSetting("MouseXAdjustment", 15);
+	config.CreateSetting("MouseYAdjustment", 15);
 	config.CreateSetting("SoundDevice", sdm_AdLib);
 	config.CreateSetting("MusicDevice", smm_AdLib);
 	config.CreateSetting("DigitalSoundDevice", sds_SoundBlaster);
 	config.CreateSetting("AlwaysRun", 0);
-	config.CreateSetting("MouseYAxisDisabled", 0);
+	config.CreateSetting("MouseYAxisDisabled", true);
 	config.CreateSetting("SoundVolume", MAX_VOLUME);
 	config.CreateSetting("MusicVolume", MAX_VOLUME);
 	config.CreateSetting("DigitizedVolume", MAX_VOLUME);
+#if defined(_WIN32) || defined(__APPLE__)
+	config.CreateSetting("Vid_FullScreen", true);
+#else
 	config.CreateSetting("Vid_FullScreen", false);
+#endif
 	config.CreateSetting("Vid_Aspect", ASPECT_NONE);
 	config.CreateSetting("ScreenWidth", screenWidth);
 	config.CreateSetting("ScreenHeight", screenHeight);

@@ -66,13 +66,13 @@ unsigned tics;
 #define JoyAx(x) (32+(x<<1))
 ControlScheme controlScheme[] =
 {
-	{ bt_moveforward,		"Forward",		JoyAx(1),	sc_UpArrow,		-1, &controly, 1, true },
-	{ bt_movebackward,		"Backward",		JoyAx(1)+1,	sc_DownArrow,	-1, &controly, 0, true },
-	{ bt_strafeleft,		"Strafe Left",	JoyAx(0),	sc_Comma,		-1, &controlstrafe, 1, true },
-	{ bt_straferight,		"Strafe Right",	JoyAx(0)+1,	sc_Peroid,		-1, &controlstrafe, 0, true },
+	{ bt_moveforward,		"Forward",		JoyAx(1),	sc_W,			-1, &controly, 1, true },
+	{ bt_movebackward,		"Backward",		JoyAx(1)+1,	sc_S,			-1, &controly, 0, true },
+	{ bt_strafeleft,		"Strafe Left",	JoyAx(0),	sc_A,			-1, &controlstrafe, 1, true },
+	{ bt_straferight,		"Strafe Right",	JoyAx(0)+1,	sc_D,			-1, &controlstrafe, 0, true },
 	{ bt_turnleft,			"Turn Left",	JoyAx(3),	sc_LeftArrow,	-1, &controlx, 1, true },
 	{ bt_turnright,			"Turn Right",	JoyAx(3)+1,	sc_RightArrow,	-1, &controlx, 0, true },
-	{ bt_attack,			"Attack",		0,			sc_Control,		0,  NULL, 0, true },
+	{ bt_attack,			"Attack",		0,			sc_UpArrow,		0,  NULL, 0, true },
 	{ bt_strafe,			"Strafe",		3,			sc_Alt,			-1, NULL, 0, true },
 	{ bt_run,				"Run",			2,			sc_LShift,		-1, NULL, 0, true },
 	{ bt_use,				"Use",			1,			sc_Space,		-1, NULL, 0, true },
