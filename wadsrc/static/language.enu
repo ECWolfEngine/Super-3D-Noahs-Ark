@@ -94,6 +94,9 @@ STR_AMTEXTUREDOVERLAY = "Textured Overlay";
 STR_AMPAUSE = "Pause Game";
 STR_AMRATIOS = "Show Level Ratios";
 STR_SMALLFEEDERS = "Small Feeders";
+STR_SCREENSIZE = "Screen Size";
+STR_SMALL = "Small";
+STR_LARGE = "Large";
 
 STR_WHICHEPISODE = "Which episode to play?";
 NA_EPISODE1 = "Carl the Camel\nStart at level 1-1";

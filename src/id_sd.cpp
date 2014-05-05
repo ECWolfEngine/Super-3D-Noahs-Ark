@@ -45,6 +45,13 @@
 #define SOUND_RATE 140	// Also affects PC Speaker sounds
 #define SOUND_TICKS (MUSIC_RATE/SOUND_RATE)
 
+// Linear falloff
+//#define TO_SDL_POSITION(pos) (((15 - (pos)) << 4) + 15)
+// Volume is based on the square of the distance to the source. (More like vanilla)
+#define TO_SDL_POSITION(pos) (((64 - ((pos) * (pos))) * 3) + 63)
+
+#define MIN_TICKS_BETWEEN_DIGI_REPEATS 10
+
 // Mutex for thread-safe audio:
 SDL_mutex *audioMutex;
 
@@ -421,8 +428,7 @@ void _SDL_PCSpeakerEmulator(void *udata, Uint8 *stream, int len)
 #define SDL_PCService()							_SDL_PCService()
 #define SDL_PCEmulateAndMix(buffer, length)		if(SoundMode == sdm_PC) _SDL_EmulateAndMixPC(buffer, length)
 
-void
-SD_StopDigitized(void)
+void SD_StopDigitized(void)
 {
 	DigiPlaying = false;
 	DigiPriority = 0;
@@ -445,8 +451,7 @@ void SD_SetPosition(int channel, int leftpos, int rightpos)
 			break;
 		case sds_SoundBlaster:
 //            SDL_PositionSBP(leftpos,rightpos);
-			Mix_SetPanning(channel, ((15 - leftpos) << 4) + 15,
-				((15 - rightpos) << 4) + 15);
+			Mix_SetPanning(channel, TO_SDL_POSITION(leftpos), TO_SDL_POSITION(rightpos));
 			break;
 	}
 }
@@ -474,6 +479,14 @@ int SD_PlayDigitized(const SoundData &which,int leftpos,int rightpos,SoundChanne
 	if (!DigiMode)
 		return 0;
 
+	// If this sound has been played too recently, don't play it again.
+	// (Fix for extremely loud sounds when one plays over itself too much.)
+	uint32_t currentTick = SDL_GetTicks();
+	if (currentTick - SoundInfo.GetLastPlayTick(which) < MIN_TICKS_BETWEEN_DIGI_REPEATS)
+		return 0;
+
+	SoundInfo.SetLastPlayTick(which, currentTick);
+
 	int channel = chan;
 	if(chan == SD_GENERIC)
 	{
@@ -497,7 +510,8 @@ int SD_PlayDigitized(const SoundData &which,int leftpos,int rightpos,SoundChanne
 		return 0;
 	}
 
-	return channel;
+	// Return channel + 1 because zero is a valid channel.
+	return channel + 1;
 }
 
 void SD_ChannelFinished(int channel)
@@ -977,9 +991,10 @@ SD_PositionSound(int leftvol,int rightvol)
 ///////////////////////////////////////////////////////////////////////////
 //
 //      SD_PlaySound() - plays the specified sound on the appropriate hardware
+//              Returns the channel of the sound if it played, else 0.
 //
 ///////////////////////////////////////////////////////////////////////////
-bool SD_PlaySound(const char* sound, SoundChannel chan)
+int SD_PlaySound(const char* sound, SoundChannel chan)
 {
 	bool            ispos;
 	int             lp,rp;
@@ -1021,11 +1036,11 @@ bool SD_PlaySound(const char* sound, SoundChannel chan)
 				return(false);
 #endif
 
-			SD_PlayDigitized(sindex, lp, rp, chan);
+			int channel = SD_PlayDigitized(sindex, lp, rp, chan);
 			SoundPositioned = ispos;
 			DigiPriority = sindex.GetPriority();
 			SoundPlaying = sound;
-			return true;
+			return channel;
 		}
 
 		return(true);
@@ -1039,22 +1054,34 @@ bool SD_PlaySound(const char* sound, SoundChannel chan)
 	if (sindex.GetPriority() < SoundPriority)
 		return 0;
 
+	bool didPlaySound = false;
+
 	switch (SoundMode)
 	{
 		default:
+			didPlaySound = true;
 			break;
 		case sdm_PC:
 			if(sindex.HasType(SoundData::PCSPEAKER))
+			{
 				SDL_PCPlaySound((PCSound *)sindex.GetData(SoundData::PCSPEAKER));
+				didPlaySound = true;
+			}
 			break;
 		case sdm_AdLib:
 			if(sindex.HasType(SoundData::ADLIB))
+			{
 				SDL_ALPlaySound((AdLibSound *)sindex.GetData(SoundData::ADLIB));
+				didPlaySound = true;
+			}
 			break;
 	}
 
-	SoundPriority = sindex.GetPriority();
-	SoundPlaying = sound;
+	if (didPlaySound)
+	{
+		SoundPriority = sindex.GetPriority();
+		SoundPlaying = sound;
+	}
 
 	return 0;
 }

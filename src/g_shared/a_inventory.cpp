@@ -236,6 +236,7 @@ bool AHealth::TryPickup(AActor *toucher)
 		if(toucher->player->health > max)
 			toucher->player->health = max;
 		toucher->health = toucher->player->health;
+		StatusBar->UpdateFace(toucher->health);
 		Destroy();
 	}
 	return true;
@@ -298,6 +299,22 @@ bool AAmmo::HandlePickup(AInventory *item, bool &good)
 
 IMPLEMENT_CLASS(BackpackItem)
 
+void ABackpackItem::BoostAmmo(AAmmo *ammo)
+{
+	if(ammo->Backpackboostamount)
+	{
+		ammo->maxamount += ammo->Backpackboostamount;
+		if(ammo->maxamount > ammo->Backpackmaxamount)
+			ammo->maxamount = ammo->Backpackmaxamount;
+	}
+	else
+		ammo->maxamount = ammo->Backpackmaxamount;
+
+	ammo->amount += ammo->Backpackamount;
+	if(ammo->amount > ammo->maxamount)
+		ammo->amount = ammo->maxamount;
+}
+
 bool ABackpackItem::HandlePickup(AInventory *item, bool &good)
 {
 	if(item->IsA(NATIVE_CLASS(BackpackItem)))
@@ -308,11 +325,7 @@ bool ABackpackItem::HandlePickup(AInventory *item, bool &good)
 			if(item->GetClass()->GetParent() == NATIVE_CLASS(Ammo))
 			{
 				AAmmo *ammo = static_cast<AAmmo*>(item);
-				if(ammo->maxamount < ammo->Backpackmaxamount)
-					ammo->maxamount = ammo->Backpackmaxamount;
-				ammo->amount += ammo->Backpackamount;
-				if(ammo->amount > ammo->maxamount)
-					ammo->amount = ammo->maxamount;
+				BoostAmmo(ammo);
 			}
 		}
 		good = true;
@@ -338,22 +351,14 @@ AInventory *ABackpackItem::CreateCopy(AActor *holder)
 			if(ammo)
 			{
 				// Increase amount and give ammo
-				if(ammo->maxamount < ammo->Backpackmaxamount)
-					ammo->maxamount = ammo->Backpackmaxamount;
-
-				ammo->amount += ammo->Backpackamount;
-				if(ammo->amount > ammo->maxamount)
-					ammo->amount = ammo->maxamount;
+				BoostAmmo(ammo);
 			}
 			else
 			{
 				// Give the ammo type with the proper amounts
 				ammo = static_cast<AAmmo *>(AActor::Spawn(cls, 0, 0, 0, 0));
-				ammo->amount = ammo->Backpackamount;
-				if(ammo->maxamount < ammo->Backpackmaxamount)
-					ammo->maxamount = ammo->Backpackmaxamount;
-				if(ammo->amount > ammo->maxamount)
-					ammo->amount = ammo->maxamount;
+				ammo->amount = 0;
+				BoostAmmo(ammo);
 
 				ammo->RemoveFromWorld();
 				if(!ammo->CallTryPickup(holder))

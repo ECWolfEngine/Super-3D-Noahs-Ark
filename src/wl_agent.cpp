@@ -301,7 +301,8 @@ void TakeDamage (int points,AActor *attacker)
 	if (godmode != 2)
 		StartDamageFlash (points);
 
-	SD_PlaySound("player/pain");
+	if (points > 0)
+		SD_PlaySound("player/pain");
 
 	StatusBar->UpdateFace(points);
 	StatusBar->DrawStatusBar();
@@ -855,8 +856,6 @@ void player_t::Reborn()
 
 	// Recalculate the projection here so that player classes with differing radii are supported.
 	CalcProjection(mo->radius);
-
-	StatusBar->DrawStatusBar();
 }
 
 void player_t::Serialize(FArchive &arc)
