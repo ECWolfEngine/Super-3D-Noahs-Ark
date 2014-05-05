@@ -256,13 +256,13 @@ int DebugKeys (void)
 
 	if (Keyboard[sc_G])             // G = god mode
 	{
-		US_CenterWindow (12,2);
+		US_CenterWindow (16,2);
 		if (godmode == 0)
-			US_PrintCentered ("God mode ON");
+			US_PrintCentered ("Invulnerability ON");
 		else if (godmode == 1)
-			US_PrintCentered ("God (no flash)");
+			US_PrintCentered ("Invuln (no flash)");
 		else if (godmode == 2)
-			US_PrintCentered ("God mode OFF");
+			US_PrintCentered ("Invulnerability OFF");
 
 		VW_UpdateScreen();
 		IN_Ack();

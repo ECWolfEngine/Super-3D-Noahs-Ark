@@ -60,5 +60,6 @@ extern bool		vid_fullscreen;
 extern Aspect	vid_aspect;
 extern bool		quitonescape;
 extern fixed	movebob;
+extern bool		unscaledweapons;
 
 #endif /* __C_CVARS__ */

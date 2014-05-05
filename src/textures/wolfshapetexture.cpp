@@ -64,8 +64,13 @@ protected:
 	Span **Spans;
 	int TopCrop;
 
+	bool IsWeaponSprite;
+	SWORD AltTopOffset, AltLeftOffset;
+	SWORD NormalTopOffset, NormalLeftOffset;
+	fixed NormalXScale, NormalYScale;
 
 	virtual void MakeTexture ();
+	void CheckSpriteSize();
 };
 
 //==========================================================================
@@ -122,6 +127,8 @@ FTexture *WolfShapeTexture_TryCreate(FileReader &file, int lumpnum)
 //
 //==========================================================================
 
+extern bool unscaledweapons;
+
 FWolfShapeTexture::FWolfShapeTexture(int lumpnum, FileReader &file)
 : FTexture(NULL, lumpnum), Pixels(0), Spans(0)
 {
@@ -143,11 +150,14 @@ FWolfShapeTexture::FWolfShapeTexture(int lumpnum, FileReader &file)
 		// be for on a Doom player sprite.
 		// Also scale it up 2.5 times, which is about what is needed to emulate
 		// the size of vanilla wolf within precision limits.
+		IsWeaponSprite = true;
 		TopOffset = 4;
 		LeftOffset -= 64;
 		xScale = 2*FRACUNIT/5;
 		yScale = 2*FRACUNIT/5;
 	}
+	else
+		IsWeaponSprite = false;
 
 	// Crop the height!
 	int minStart = 64;
@@ -174,7 +184,15 @@ FWolfShapeTexture::FWolfShapeTexture(int lumpnum, FileReader &file)
 	Height = maxEnd-minStart;
 	TopOffset -= minStart;
 
+	AltTopOffset = TopOffset - 90;
+	AltLeftOffset = LeftOffset - 96;
+	NormalTopOffset = TopOffset;
+	NormalLeftOffset = LeftOffset;
+	NormalXScale = xScale;
+	NormalYScale = yScale;
+
 	CalcBitSize ();
+	CheckSpriteSize();
 }
 
 //==========================================================================
@@ -201,6 +219,8 @@ FWolfShapeTexture::~FWolfShapeTexture ()
 
 void FWolfShapeTexture::Unload ()
 {
+	CheckSpriteSize();
+
 	if(Pixels != NULL)
 	{
 		delete[] Pixels;
@@ -285,6 +305,33 @@ void FWolfShapeTexture::MakeTexture ()
 			column += 6;
 			for(int y = start;y < end;y++)
 				out[y] = GPalette.Remap[in[y]];
+		}
+	}
+}
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
+void FWolfShapeTexture::CheckSpriteSize()
+{
+	if(IsWeaponSprite)
+	{
+		if(unscaledweapons)
+		{
+			TopOffset = AltTopOffset;
+			LeftOffset = AltLeftOffset;
+			xScale = FRACUNIT;
+			yScale = FRACUNIT;
+		}
+		else
+		{
+			TopOffset = NormalTopOffset;
+			LeftOffset = NormalLeftOffset;
+			xScale = NormalXScale;
+			yScale = NormalYScale;
 		}
 	}
 }

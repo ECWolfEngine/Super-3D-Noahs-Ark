@@ -637,7 +637,7 @@ void AutoMap::DrawStats() const
 
 	if(amFlags & AMF_DispRatios)
 	{
-		statString.Format("K: %d/%d\nS: %d/%d\nT: %d/%d",
+		statString.Format("A: %d/%d\nS: %d/%d\nF: %d/%d",
 			gamestate.killcount, gamestate.killtotal,
 			gamestate.secretcount, gamestate.secrettotal,
 			gamestate.treasurecount, gamestate.treasuretotal);
