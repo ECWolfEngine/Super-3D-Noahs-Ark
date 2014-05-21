@@ -125,7 +125,7 @@ NOAH_BRIEF_03 = "ZZZZZ... Great job, Noah!. Ginny is\nsnoring away.\n\nBoy, it s
 NOAH_BRIEF_04 = "You're doing a great job, Noah!\nYou took care of that Melvin like\na real pro.\n\nI hope you haven't worn yourself\nout yet, because more challenges\nare ahead.\n\nKerry the Kangaroo awaits you,\nand she doesn't look the least\nbit tired. Are you ready for her?\nShe needs to rest like the other\nanimals.";
 NOAH_BRIEF_05 = "Wow! Kerry was no challenge for\nyou! Can you keep up the pace\nwhen faced with Ernie the\nElephant?\n\nDon't worry. Very soon you will\nbe on dry land, and you won't\nhave to chase the animals around\nthe ark anymore.";
 NOAH_BRIEF_06 = "You are almost there! If you can\nget through one more day, you\nwill be out of here for good!\n\nRumor has it one of the bears\ndoes not want to be found. In\nfact he may try to hide from\nyou. Be on the alert for Burt\nthe Bear.\n\nGet him to sleep and your work\nis done!";
-NOAH_BRIEF_COPYRIGHT = "\nSuper 3-D Noah's Ark\n\n\n(C)1995 Wisdom Tree, Inc.\nAll rights reserved.\n\n\nThis game contains copyrighted\nsoftware code owned by\nId Software, Inc\n(C)1992 Id Software, Inc.\nAll rights reserved.\n";
+NOAH_BRIEF_COPYRIGHT = "\nSuper 3-D Noah's Ark\n\n\n(C)2014 Wisdom Tree, Inc.\nAll rights reserved.\n\n\nThis game contains copyrighted\nsoftware code owned by\nId Software, Inc\n(C)1992 Id Software, Inc.\nAll rights reserved.\n";
 
 CC_GOAT = "Goat";
 CC_SHEEP = "Sheep";

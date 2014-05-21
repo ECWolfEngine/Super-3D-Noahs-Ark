@@ -24,6 +24,10 @@ actor LargeBandage : Health 179
 	}
 }
 
+actor OneUpHealth : Health
+{
+	inventory.amount 99
+}
 actor ArkOneUp : CustomInventory 187
 {
 	inventory.pickupsound "misc/1up"
