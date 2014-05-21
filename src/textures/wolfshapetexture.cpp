@@ -184,8 +184,8 @@ FWolfShapeTexture::FWolfShapeTexture(int lumpnum, FileReader &file)
 	Height = maxEnd-minStart;
 	TopOffset -= minStart;
 
-	AltTopOffset = TopOffset - 90;
-	AltLeftOffset = LeftOffset - 96;
+	AltTopOffset = TopOffset - 62;
+	AltLeftOffset = LeftOffset - 67;
 	NormalTopOffset = TopOffset;
 	NormalLeftOffset = LeftOffset;
 	NormalXScale = xScale;
@@ -317,14 +317,22 @@ void FWolfShapeTexture::MakeTexture ()
 
 void FWolfShapeTexture::CheckSpriteSize()
 {
+	// SNES renders at 256x224 window framed to 224x192. Physical aspect of the
+	// screen is of course 4:3 (260x192).  Statusbar brings that down to 160
+	// vertical.  So to emulate that at 320x200/240 we need to use a scale of
+	// about (123%,104%) however I choose to only use one of the scales since
+	// it wouldn't feel right to change the aspect.
+	// SNES weapon rendering is unscaled.
+	static const fixed SNES_SCALE = 0xD000;
+
 	if(IsWeaponSprite)
 	{
 		if(unscaledweapons)
 		{
 			TopOffset = AltTopOffset;
 			LeftOffset = AltLeftOffset;
-			xScale = FRACUNIT;
-			yScale = FRACUNIT;
+			xScale = SNES_SCALE;
+			yScale = SNES_SCALE;
 		}
 		else
 		{
