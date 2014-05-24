@@ -365,9 +365,19 @@ class UWMFParser : public TextMapParser
 				PMData* pdata = data[i];
 				for(unsigned int j = 0;j < size;++j)
 				{
-					plane.map[j].SetTile(pdata[j].tile < 0 ? NULL : &gm->tilePalette[pdata[j].tile]);
-					plane.map[j].sector = pdata[j].sector < 0 ? NULL : &gm->sectorPalette[pdata[j].sector];
-					plane.map[j].zone = pdata[j].zone < 0 ? NULL : &gm->zonePalette[pdata[j].zone];
+					plane.map[j].SetTile(
+						pdata[j].tile < 0 || (unsigned)pdata[j].tile >= gm->tilePalette.Size()
+						? NULL : &gm->tilePalette[pdata[j].tile]
+					);
+					plane.map[j].sector =
+						pdata[j].sector < 0 || (unsigned)pdata[j].sector >= gm->sectorPalette.Size()
+						? NULL : &gm->sectorPalette[pdata[j].sector];
+					plane.map[j].zone =
+						pdata[j].zone < 0 || (unsigned)pdata[j].zone >= gm->zonePalette.Size()
+						? NULL : &gm->zonePalette[pdata[j].zone];
+
+					if(pdata[j].tag)
+						gm->SetSpotTag(&plane.map[j], pdata[j].tag);
 				}
 			}
 
@@ -399,6 +409,10 @@ class UWMFParser : public TextMapParser
 				pdata[i].sector = MustGetSignedInteger(sc);
 				sc.MustGetToken(',');
 				pdata[i].zone = MustGetSignedInteger(sc);
+				if(sc.CheckToken(','))
+					pdata[i].tag = MustGetSignedInteger(sc);
+				else
+					pdata[i].tag = 0;
 				sc.MustGetToken('}');
 				if(++i != size)
 					sc.MustGetToken(',');
@@ -544,6 +558,7 @@ class UWMFParser : public TextMapParser
 			int tile;
 			int sector;
 			int zone;
+			int tag;
 		};
 
 		GameMap * const gm;
