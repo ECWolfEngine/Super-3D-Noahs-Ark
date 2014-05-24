@@ -1,3 +1,8 @@
+Super 3D Noah's Ark
+===================
+
+This is a customized version of ECWolf created for Wisdom Tree. This version loads noah3d.wad automatically (available in the wadsrc directory) and contains a few cosmetic changes to be a little more accurate to vanilla. It also removes support for a few features that are not needed for playing Super 3D Noah's Ark (file format support, Wolf3D support, etc).
+
 ECWolf
 ======
 
