@@ -102,7 +102,7 @@ if(WIN32)
 		win32/wl_iwad_win32.cpp
 		sdl_winmain.cpp
 	)
-elseif(APPLE)
+elseif(APPLE OR ANDROID)
 	set(NO_GTK ON)
 else(WIN32)
 	option( NO_GTK "Disable GTK+ dialogs (Not applicable to Windows)" ON )
@@ -136,6 +136,17 @@ if(APPLE)
 	if(BUILD_BUNDLE)
 		set(PLATFORM_EXE_FLAGS MACOSX_BUNDLE)
 	endif(BUILD_BUNDLE)
+elseif(ANDROID)
+	set(EXTRA_FILES
+		android/android-jni.cpp
+		android/in_android.cpp
+		android/wl_iwad_picker_android.cpp
+	)
+
+	include_directories(${TOUCHCONTROLS_INCLUDE_DIR} ${SIGCPP_INCLUDE_DIR} ${TINYXML_INCLUDE_DIR} ${LIBPNG_INCLUDE_DIR})
+	add_definitions(-Dmalloc_usable_size=dlmalloc_usable_size)
+
+	set(EXTRA_LIBRARIES ${EXTRA_LIBRARIES} ${TOUCHCONTROLS_LIBRARY} log)
 else(APPLE)
 	set(PLATFORM_EXE_FLAGS "")
 endif(APPLE)
@@ -152,9 +163,7 @@ file(GLOB HEADER_FILES
 	*.h
 )
 
-add_executable(noah3d ${PLATFORM_EXE_FLAGS}
-	${HEADER_FILES}
-	${OPL_SOURCES}
+set(SOURCE_FILES
 	g_shared/a_deathcam.cpp
 	g_shared/a_inventory.cpp
 	g_shared/a_keys.cpp
@@ -281,8 +290,27 @@ add_executable(noah3d ${PLATFORM_EXE_FLAGS}
 	wl_text.cpp
 	zstrformat.cpp
 	zstring.cpp
-	${EXTRA_FILES}
 )
+
+if(NOT ANDROID)
+	add_executable(noah3d ${PLATFORM_EXE_FLAGS}
+		${HEADER_FILES}
+		${OPL_SOURCES}
+		${SOURCE_FILES}
+		${EXTRA_FILES}
+	)
+else(NOT ANDROID)
+	add_library(noah3d SHARED
+		${HEADER_FILES}
+		${OPL_SOURCES}
+		${SOURCE_FILES}
+		${EXTRA_FILES}
+	)
+
+	# Link test
+	add_executable(link-test android/link-test.c)
+	target_link_libraries(link-test noah3d)
+endif(NOT ANDROID)
 
 add_dependencies(noah3d lzma gdtoa revision_check)
 # Noah3D - No jpeg
@@ -290,7 +318,9 @@ target_link_libraries(noah3d ${EXTRA_LIBRARIES} ${SDL_LIBRARY} ${SDLMIXER_LIBRAR
 set_target_properties(noah3d PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_DIR})
 
 # Install
-install(TARGETS noah3d BUNDLE DESTINATION ${OUTPUT_DIR} RUNTIME DESTINATION bin COMPONENT Runtime)
+if(NOT ANDROID)
+	install(TARGETS noah3d BUNDLE DESTINATION ${OUTPUT_DIR} RUNTIME DESTINATION bin COMPONENT Runtime)
+endif(NOT ANDROID)
 
 # Project file source groupings
 source_group("Sources" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/.+")
