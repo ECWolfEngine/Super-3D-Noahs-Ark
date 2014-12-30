@@ -1,7 +1,9 @@
 // ID_VL.C
 
 #include <string.h>
+#include "c_cvars.h"
 #include "wl_def.h"
+#include "id_in.h"
 #include "id_vl.h"
 #include "id_vh.h"
 #include "w_wad.h"
@@ -11,6 +13,7 @@
 #include "v_video.h"
 #include "v_palette.h"
 #include "wl_draw.h"
+#include "wl_game.h"
 #include "wl_main.h"
 #include "wl_play.h"
 

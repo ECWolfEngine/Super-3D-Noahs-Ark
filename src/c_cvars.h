@@ -62,4 +62,10 @@ extern bool		quitonescape;
 extern fixed	movebob;
 extern bool		unscaledweapons;
 
+//
+// control info
+//
+extern  bool		alwaysrun;
+extern  bool		mouseenabled, mouseyaxisdisabled, joystickenabled;
+
 #endif /* __C_CVARS__ */

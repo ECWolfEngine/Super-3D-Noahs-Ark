@@ -263,6 +263,10 @@ bool IN_JoyPresent()
 	return Joystick != NULL;
 }
 
+#ifdef __ANDROID__
+bool ShadowKey = false;
+#endif
+
 static void processEvent(SDL_Event *event)
 {
 	switch (event->type)
@@ -377,13 +381,35 @@ static void processEvent(SDL_Event *event)
 				}
 			}
 
+#ifdef __ANDROID__
+			if(ShadowKey && LastScan == SCANCODE_UNMASK(event->key.keysym.sym))
+			{
+				ShadowKey = false;
+				break;
+			}
+#endif
+
 			if(SCANCODE_UNMASK(key)<SDLK_LAST)
 				Keyboard[SCANCODE_UNMASK(key)] = 0;
 			break;
 		}
 
-		/*case SDL_ACTIVEEVENT:
+		case SDL_ACTIVEEVENT:
 		{
+			if (!fullscreen && forcegrabmouse && (event->active.state & SDL_APPINPUTFOCUS || event->active.state & SDL_APPACTIVE))
+			{
+					// Release the mouse if we lose input focus, grab it again
+					// when we gain input focus.
+				if (event->active.gain == 1)
+				{
+					IN_GrabMouse();
+				}
+				else
+				{
+					IN_ReleaseMouse();
+				}
+			}
+								/*
 			if(fullscreen && (event->active.state & SDL_APPACTIVE) != 0)
 			{
 					if(event->active.gain)
@@ -391,8 +417,10 @@ static void processEvent(SDL_Event *event)
 						NeedRestore = false;
 					}
 					else NeedRestore = true;
-			}
-		}*/
+			}*/
+
+			break;
+		}
 	}
 }
 
@@ -410,6 +438,12 @@ void IN_WaitAndProcessEvents()
 void IN_ProcessEvents()
 {
 	SDL_Event event;
+
+#ifdef __ANDROID__
+	if(!ShadowKey)
+		Keyboard[LastScan] = 0;
+	ShadowKey = true;
+#endif
 
 	while (SDL_PollEvent(&event))
 	{
@@ -716,6 +750,14 @@ void IN_GrabMouse()
 		GrabInput = true;
 		SDL_SetRelativeMouseMode(SDL_TRUE);
 	}
+}
+
+void IN_AdjustMouse()
+{
+	if (mouseenabled && (forcegrabmouse || fullscreen))
+		IN_GrabMouse();
+	else if (!fullscreen)
+		IN_ReleaseMouse();
 }
 
 bool IN_IsInputGrabbed()

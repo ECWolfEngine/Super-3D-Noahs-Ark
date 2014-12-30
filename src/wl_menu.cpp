@@ -35,7 +35,7 @@
 
 #include <climits>
 
-extern int	lastgamemusicoffset;
+static int	lastgamemusicoffset;
 const ClassDef *playerClass = NULL;
 EpisodeInfo	*episode = 0;
 int BORDCOLOR, BORD2COLOR, BORD3COLOR, BKGDCOLOR, STRIPE, STRIPEBG,
@@ -150,12 +150,11 @@ MENU_LISTENER(EnterControlBase)
 	controlBase[5]->setEnabled(IN_JoyPresent());
 	controlBase.draw();
 
-	if(forcegrabmouse || (fullscreen && mouseenabled))
-		IN_GrabMouse();
-	else if(!fullscreen)
-		IN_ReleaseMouse();
+	IN_AdjustMouse();
+
 	return true;
 }
+
 MENU_LISTENER(SetPlayerClassAndSwitch)
 {
 	playerClass = ClassDef::FindClass(gameinfo.PlayerClasses[which]);
@@ -224,6 +223,9 @@ MENU_LISTENER(ToggleFullscreen)
 	VL_SetVGAPlaneMode();
 	screen->Lock(false);
 	displayMenu.draw();
+
+	IN_AdjustMouse();
+
 	return true;
 }
 MENU_LISTENER(SetAspectRatio)
@@ -437,7 +439,7 @@ void CreateMenus()
 	soundBase.addItem(new SliderMenuItem(AdlibVolume, 150, MAX_VOLUME, language["STR_SOFT"], language["STR_LOUD"], SD_UpdatePCSpeakerVolume));
 	soundBase.addItem(new LabelMenuItem(language["STR_MUSICDEVICE"]));
 	soundBase.addItem(new MultipleChoiceMenuItem(SetMusic, musicOptions, 2, musicMode));
-	soundBase.addItem(new SliderMenuItem(MusicVolume, 150, MAX_VOLUME, language["STR_SOFT"], language["STR_LOUD"]));
+	soundBase.addItem(new SliderMenuItem(MusicVolume, 150, MAX_VOLUME, language["STR_SOFT"], language["STR_LOUD"], SD_UpdateMusicVolume));
 
 	controlBase.setHeadPicture("M_CONTRL");
 	controlBase.addItem(new BooleanMenuItem(language["STR_ALWAYSRUN"], alwaysrun, EnterControlBase));
@@ -470,6 +472,10 @@ void CreateMenus()
 	mouseSensitivity.addItem(new LabelMenuItem(language["STR_MOUSEYADJ"]));
 	mouseSensitivity.addItem(new SliderMenuItem(mouseyadjustment, 173, 20, language["STR_SLOW"], language["STR_FAST"]));
 
+	mouseSensitivity.addItem(new LabelMenuItem(language["STR_PANXADJ"]));
+	mouseSensitivity.addItem(new SliderMenuItem(panxadjustment, 173, 20, language["STR_SLOW"], language["STR_FAST"]));
+	mouseSensitivity.addItem(new LabelMenuItem(language["STR_PANYADJ"]));
+	mouseSensitivity.addItem(new SliderMenuItem(panyadjustment, 173, 20, language["STR_SLOW"], language["STR_FAST"]));
 
 
 	controls.setHeadPicture("M_CUSTOM");
@@ -1039,15 +1045,16 @@ int StartCPMusic (const char* song)
 ///////////////////////////////////////////////////////////////////////////
 void CheckPause (void)
 {
-	if (Paused)
+	static int pauseofs = 0;
+	if (Paused & 1)
 	{
 		switch (SoundStatus)
 		{
 			case 0:
-				SD_MusicOn ();
+				SD_ContinueMusic(gameinfo.MenuMusic, pauseofs);
 				break;
 			case 1:
-				SD_MusicOff ();
+				pauseofs = music ? SD_PauseMusic() : SD_MusicOff();
 				break;
 		}
 
