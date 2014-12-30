@@ -33,7 +33,7 @@
         android:icon="@drawable/ic_launcher"
         android:label="@string/quake_activity" >
         <activity
-            android:name="com.beloko.wolf3d.EntryActivity"
+            android:name="com.beloko.noah.EntryActivity"
             android:configChanges="orientation|keyboardHidden"
             android:label="@string/title_activity_entry"
             android:launchMode="singleInstance"

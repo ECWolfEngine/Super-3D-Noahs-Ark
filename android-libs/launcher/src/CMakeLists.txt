@@ -37,10 +37,10 @@ add_jar(ecwolf-android
 	com/beloko/idtech/TouchControlsEditing.java
 	com/beloko/idtech/Utils.java
 	com/beloko/libsdl/SDLLib.java
-	com/beloko/wolf3d/AboutDialog.java
-	com/beloko/wolf3d/Advert.java
-	com/beloko/wolf3d/EntryActivity.java
-	com/beloko/wolf3d/LaunchFragment.java
+	com/beloko/noah/AboutDialog.java
+	com/beloko/noah/Advert.java
+	com/beloko/noah/EntryActivity.java
+	com/beloko/noah/LaunchFragment.java
 	com/mobeta/android/dslv/DragSortController.java
 	com/mobeta/android/dslv/DragSortCursorAdapter.java
 	com/mobeta/android/dslv/DragSortItemView.java
@@ -59,7 +59,7 @@ add_jar(ecwolf-android
 add_dependencies(ecwolf-android ecwolf TouchControls pk3)
 
 add_custom_command(TARGET ecwolf-android POST_BUILD
-	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:ecwolf>" "${CMAKE_CURRENT_BINARY_DIR}/lib/armeabi/$<TARGET_FILE_NAME:ecwolf>"
+	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:noah3d>" "${CMAKE_CURRENT_BINARY_DIR}/lib/armeabi/$<TARGET_FILE_NAME:noah3d>"
 	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:TouchControls>" "${CMAKE_CURRENT_BINARY_DIR}/lib/armeabi/$<TARGET_FILE_NAME:TouchControls>"
 	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${SDL_LIBRARY}" "${CMAKE_CURRENT_BINARY_DIR}/lib/armeabi/libSDL.so"
 	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${SDL_MIXER_LIBRARY}" "${CMAKE_CURRENT_BINARY_DIR}/lib/armeabi/libSDL_mixer.so"

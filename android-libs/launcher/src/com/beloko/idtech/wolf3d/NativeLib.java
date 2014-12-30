@@ -29,7 +29,7 @@ public class NativeLib implements QuakeControlInterface{
 			SDLLib.loadSDL();
 			System.loadLibrary("TouchControls");
 
-			System.loadLibrary("ecwolf");
+			System.loadLibrary("noah3d");
 		}
 		catch (UnsatisfiedLinkError ule) {
 			Log.e("JNI", "WARNING: Could not load shared library: " + ule.toString());
