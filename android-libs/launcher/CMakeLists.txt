@@ -4,6 +4,8 @@ find_package(Java REQUIRED)
 include(UseJava)
 
 set(APK_OUTPUT "${CMAKE_BINARY_DIR}/noah3d.apk")
+set(APK_PACKAGE_NAME "com.beloko.noah")
+set(APK_ENTRY_ACTIVITY "com.beloko.noah.EntryActivity")
 
 set(ANDROID_SDK "ANDROID_SDK-NOTFOUND" CACHE PATH "Path to android.jar")
 set(ANDROID_SDK_TOOLS "ANDROID_SDK_TOOLS-NOTFOUND" CACHE PATH "Path to android build-tools")
@@ -30,7 +32,7 @@ add_subdirectory(src)
 
 add_custom_target(runadb
 	COMMAND "${ANDROID_ADB_BINARY}" install -r "${APK_OUTPUT}"
-	COMMAND "${ANDROID_ADB_BINARY}" shell am start com.beloko.idtech/com.beloko.noah.EntryActivity
+	COMMAND "${ANDROID_ADB_BINARY}" shell am start "${APK_PACKAGE_NAME}/${APK_ENTRY_ACTIVITY}"
 	COMMAND "${ANDROID_ADB_BINARY}" shell logcat
 	DEPENDS ecwolf-android
 	WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
