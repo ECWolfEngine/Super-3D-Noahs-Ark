@@ -438,9 +438,11 @@ static void InitGame()
 	VL_SetVGAPlaneMode (true);
 	DrawStartupConsole();
 
+#if !SDL_VERSION_ATLEAST(2,0,0)
 #if defined _WIN32
 	if(!fullscreen)
 		SetupWM();
+#endif
 #endif
 	VW_UpdateScreen();
 
@@ -841,7 +843,7 @@ static void DemoLoop()
 //
 // Tries to guess the physical dimensions of the screen based on the
 // screen's pixel dimensions.
-int CheckRatio (int width, int height)//, int *trueratio)
+int CheckRatio (int width, int height, int *trueratio)
 {
 	int fakeratio = -1;
 	Aspect ratio;
@@ -896,10 +898,10 @@ int CheckRatio (int width, int height)//, int *trueratio)
 		ratio = ASPECT_4_3;
 	}
 
-	/*if (trueratio != NULL)
+	if (trueratio != NULL)
 	{
 		*trueratio = ratio;
-	}*/
+	}
 	return (fakeratio >= 0) ? fakeratio : ratio;
 }
 

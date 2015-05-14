@@ -228,6 +228,11 @@ MENU_LISTENER(ToggleFullscreen)
 
 	return true;
 }
+MENU_LISTENER(ToggleVsync)
+{
+	screen->SetVSync(vid_vsync);
+	return true;
+}
 MENU_LISTENER(SetAspectRatio)
 {
 	vid_aspect = static_cast<Aspect>(which);
@@ -455,6 +460,9 @@ void CreateMenus()
 	displayMenu.setHeadText(language["STR_DISPLAY"]);
 #ifndef __ANDROID__
 	displayMenu.addItem(new BooleanMenuItem(language["STR_FULLSCREEN"], vid_fullscreen, ToggleFullscreen));
+#endif
+#if SDL_VERSION_ATLEAST(2,0,0)
+	displayMenu.addItem(new BooleanMenuItem(language["STR_VSYNC"], vid_vsync, ToggleVsync));
 #endif
 	displayMenu.addItem(new BooleanMenuItem(language["STR_SMALLFEEDERS"], unscaledweapons, ChangeWeaponScale));
 	displayMenu.addItem(new MultipleChoiceMenuItem(SetAspectRatio, aspectOptions, 6, vid_aspect));
@@ -835,6 +843,10 @@ void WaitKeyUp (void)
 // READ KEYBOARD, JOYSTICK AND MOUSE FOR INPUT
 //
 ////////////////////////////////////////////////////////////////////
+
+// Store relative mouse movement until menu changes.
+static int menumousex, menumousey;
+
 void ReadAnyControl (ControlInfo * ci)
 {
 	int mouseactive = 0;
@@ -844,37 +856,40 @@ void ReadAnyControl (ControlInfo * ci)
 	if (mouseenabled && IN_IsInputGrabbed())
 	{
 		int mousex, mousey, buttons;
-		buttons = SDL_GetMouseState(&mousex, &mousey);
+		buttons = SDL_GetRelativeMouseState(&mousex, &mousey);
+		menumousex += mousex;
+		menumousey += mousey;
+
 		int middlePressed = buttons & SDL_BUTTON(SDL_BUTTON_MIDDLE);
 		int rightPressed = buttons & SDL_BUTTON(SDL_BUTTON_RIGHT);
 		buttons &= ~(SDL_BUTTON(SDL_BUTTON_MIDDLE) | SDL_BUTTON(SDL_BUTTON_RIGHT));
 		if(middlePressed) buttons |= 1 << 2;
 		if(rightPressed) buttons |= 1 << 1;
 
-		if(mousey - CENTERY < -SENSITIVE)
+		if(menumousey < -SENSITIVE)
 		{
 			ci->dir = dir_North;
 			mouseactive = 1;
 		}
-		else if(mousey - CENTERY > SENSITIVE)
+		else if(menumousey > SENSITIVE)
 		{
 			ci->dir = dir_South;
 			mouseactive = 1;
 		}
 
-		if(mousex - CENTERX < -SENSITIVE)
+		if(menumousex < -SENSITIVE)
 		{
 			ci->dir = dir_West;
 			mouseactive = 1;
 		}
-		else if(mousex - CENTERX > SENSITIVE)
+		else if(menumousex > SENSITIVE)
 		{
 			ci->dir = dir_East;
 			mouseactive = 1;
 		}
 
 		if(mouseactive)
-			IN_CenterMouse();
+			menumousex = menumousey = 0;
 
 		if (buttons)
 		{
@@ -1117,6 +1132,9 @@ void MenuFadeIn()
 
 void ShowMenu(Menu &menu)
 {
+	// Clear out any residual mouse movement.
+	menumousex = menumousey = 0;
+
 	VW_FadeOut ();
 	if(screenHeight % 200 != 0)
 		VL_ClearScreen(0);
