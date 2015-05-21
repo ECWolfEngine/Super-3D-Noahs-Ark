@@ -156,6 +156,16 @@ else(APPLE)
 	set(PLATFORM_EXE_FLAGS "")
 endif(APPLE)
 
+# Steamworks for S3DNA
+set(STEAMWORKS_INCLUDE_DIR "" CACHE PATH "Path to SteamWorks include directory.")
+set(STEAMWORKS_LIBRARY "" CACHE FILEPATH "SteamWorks library.")
+if(STEAMWORKS_LIBRARY)
+	include_directories(${STEAMWORKS_INCLUDE_DIR})
+	set(EXTRA_LIBRARIES ${EXTRA_LIBRARIES} ${STEAMWORKS_LIBRARY})
+else()
+	add_definitions(-DNO_STEAMWORKS)
+endif()
+
 # Glob for the header files so project generation can include them
 file(GLOB HEADER_FILES
 	g_shared/*.h
@@ -244,6 +254,7 @@ set(SOURCE_FILES
 	g_conversation.cpp
 	g_intermission.cpp
 	g_mapinfo.cpp
+	i_steamworks.cpp
 	gamemap.cpp
 	gamemap_planes.cpp
 	gamemap_uwmf.cpp

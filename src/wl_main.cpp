@@ -45,6 +45,7 @@
 #include "filesys.h"
 #include "g_conversation.h"
 #include "g_intermission.h"
+#include "i_steamworks.h"
 
 #include <clocale>
 
@@ -180,6 +181,9 @@ void ShutdownId (void)
 	US_Shutdown ();         // This line is completely useless...
 	SD_Shutdown ();
 	IN_Shutdown ();
+
+	// S3DNA - SteamWorks
+	SteamWorks::Shutdown();
 }
 
 
@@ -445,6 +449,11 @@ static void InitGame()
 #endif
 #endif
 	VW_UpdateScreen();
+
+//
+// S3DNA - SteamWorks integration
+//
+	SteamWorks::Init();
 
 //
 // Load Actors
