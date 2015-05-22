@@ -55,6 +55,7 @@
 #include "wl_game.h"
 #include "wl_menu.h"
 #include "thingdef/thingdef.h"
+#include "i_steamworks.h"
 
 static FRandom pr_conversation("Conversation");
 
@@ -633,6 +634,13 @@ void StartConversation(AActor *npc)
 			if(response[0] == '$')
 				response = language[response.Mid(1)];
 			GiveConversationItem(players[0].mo, choice.GiveItem);
+
+			// S3DNA - SteamWorks
+			if(choice.YesMessage.Compare("$NOAH_CORRECT") == 0 && (*page)->Name.IndexOf("Question #") == 0)
+			{
+				int num = clamp(atoi((*page)->Name.GetChars()+10)-1, 0, 98);
+				SteamWorks::QuestionAnswered(num);
+			}
 
 			quiz.drawBackground();
 

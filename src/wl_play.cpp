@@ -25,6 +25,7 @@
 #include "g_mapinfo.h"
 #include "a_inventory.h"
 #include "am_map.h"
+#include "i_steamworks.h"
 
 /*
 =============================================================================
@@ -564,6 +565,8 @@ void CheckKeys (void)
 
 		DrawPlayBorderSides ();
 		DebugOk = 1;
+
+		SteamWorks::CheatsEnabled();
 	}
 
 	//
@@ -976,6 +979,8 @@ void PlayLoop (void)
 				AActor::FinishSpawningActors();
 			}
 		}
+
+		SteamWorks::AsyncTick();
 
 		UpdatePaletteShifts ();
 

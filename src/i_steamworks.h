@@ -37,8 +37,17 @@
 
 namespace SteamWorks {
 
+void AsyncTick();
+void Reset();
 void Init();
 void Shutdown();
+
+// Game event hooks
+void CheatsEnabled();
+void GameLoaded();
+void NewGame();
+void LevelCompleted();
+void QuestionAnswered(int number);
 
 }
 

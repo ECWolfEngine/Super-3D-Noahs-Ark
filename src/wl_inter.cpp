@@ -14,6 +14,7 @@
 #include "wl_text.h"
 #include "g_mapinfo.h"
 #include "colormatcher.h"
+#include "i_steamworks.h"
 
 LRstruct LevelRatios;
 
@@ -538,6 +539,8 @@ static void DetermineIntermissionMode()
 
 void LevelCompleted (void)
 {
+	SteamWorks::LevelCompleted();
+
 	DetermineIntermissionMode();
 
 	InterState.bonus = 0;

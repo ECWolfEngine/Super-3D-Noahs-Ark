@@ -59,6 +59,7 @@
 #include "wl_menu.h"
 #include "wl_play.h"
 #include "textures/textures.h"
+#include "i_steamworks.h"
 
 void R_RenderView();
 extern byte* vbuf;
@@ -622,6 +623,8 @@ bool Load(const FString &filename)
 
 	delete png;
 	fclose(fileh);
+
+	SteamWorks::GameLoaded();
 	return true;
 }
 

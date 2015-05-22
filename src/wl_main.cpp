@@ -161,6 +161,8 @@ void NewGame (int difficulty, const FString &map, bool displayBriefing, const Cl
 
 	Dialog::ClearConversations();
 
+	SteamWorks::NewGame();
+
 	startgame = true;
 }
 
@@ -1093,6 +1095,10 @@ static const char* CheckParameters(int argc, char *argv[], TArray<FString> &file
 		{
 			if(++i < argc)
 				FileSys::SetDirectoryPath(FileSys::DIR_Saves, argv[i]);
+		}
+		else IFARG("--resetsteam")
+		{
+			SteamWorks::Reset();
 		}
 		else
 			files.Push(argv[i]);
