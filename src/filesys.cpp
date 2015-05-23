@@ -514,10 +514,10 @@ SQWORD File::getMTime() const
 {
 #ifdef _WIN32
 	struct __stat64 fileStat;
-	if(IsWinNT)
+	if(FileSys::IsWinNT)
 	{
 		wchar_t wpath[MAX_PATH];
-		ConvertName(path, wpath);
+		FileSys::ConvertName(filename, wpath);
 		if(_wstat64(wpath, &fileStat) == 0)
 		{
 			return fileStat.st_mtime;
@@ -525,7 +525,7 @@ SQWORD File::getMTime() const
 	}
 	else
 	{
-		if(_stat64(path, &fileStat) == 0)
+		if(_stat64(filename, &fileStat) == 0)
 		{
 			return fileStat.st_mtime;
 		}
