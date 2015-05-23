@@ -510,6 +510,37 @@ FString File::getInsensitiveFile(const FString &filename, bool sensitiveExtensio
 #endif
 }
 
+SQWORD File::getMTime() const
+{
+#ifdef _WIN32
+	struct __stat64 fileStat;
+	if(IsWinNT)
+	{
+		wchar_t wpath[MAX_PATH];
+		ConvertName(path, wpath);
+		if(_wstat64(wpath, &fileStat) == 0)
+		{
+			return fileStat.st_mtime;
+		}
+	}
+	else
+	{
+		if(_stat64(path, &fileStat) == 0)
+		{
+			return fileStat.st_mtime;
+		}
+	}
+	return 0;
+#else
+	struct stat fileStat;
+	if(stat(filename, &fileStat) == 0)
+	{
+		return fileStat.st_mtime;
+	}
+	return 0;
+#endif
+}
+
 static TMap<unsigned int, FString> VirtualRenameTable;
 
 /**

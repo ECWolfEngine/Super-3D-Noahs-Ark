@@ -96,6 +96,9 @@ class File
 		void					rename(const FString &newname);
 		bool					remove();
 
+		// S3DNA
+		SQWORD					getMTime() const;
+
 	protected:
 		void					init(const FString &filename);
 
