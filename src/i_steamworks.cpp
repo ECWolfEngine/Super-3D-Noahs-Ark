@@ -225,7 +225,7 @@ void LevelCompleted()
 				AwardAchievement(ACHIEVEMENT_CompleteLevel1 + GetEpisode(curLevel));
 		}
 
-		// Arkcade mode
+		// Arkade mode
 		if(episodeTransition && StartingLevel != -1)
 		{
 			AwardAchievement(ACHIEVEMENT_ArcadeLevel1 + GetEpisode(curLevel));
@@ -245,6 +245,10 @@ void LevelCompleted()
 			}
 		}
 	}
+
+	// Renable Arkade mode on an episode transition
+	if(episodeTransition && StartingLevel == -1)
+		StartingLevel = nextLevel.LevelNumber-1;
 }
 
 void QuestionAnswered(int num)

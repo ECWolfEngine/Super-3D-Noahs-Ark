@@ -139,6 +139,8 @@ void BJ_Breathe (bool drawOnly=false)
 		return;
 	}
 
+	SteamWorks::AsyncTick();
+
 	SDL_Delay(5);
 
 	if ((int32_t) GetTimeCount () - lastBreathTime > max)
