@@ -96,6 +96,7 @@ void CheatsEnabled()
 
 // Starting level number constants for each episode
 static const int LevelTable[7] = { 0, 3, 7, 12, 17, 23, 30 };
+static const int SegmentMask[6] = { 0x7, 0x78, 0xF80, 0x1F000, 0x7E0000, 0x3F800000 };
 enum { MAP_Secret1 = 11, MAP_Secret2 = 29 };
 
 static int GetEpisode(int level)
@@ -139,17 +140,20 @@ static bool CheckAll(bool data[N])
 
 static bool SingleSegment = false; // Elegable for Arkcade mode achievements?
 static int StartingLevel = -1;
+static int SegmentCompleted = 0;
 
 void GameLoaded()
 {
 	SingleSegment = false;
 	StartingLevel = -1;
+	SegmentCompleted = 0;
 }
 
 void NewGame()
 {
 	SingleSegment = true;
 	StartingLevel = levelInfo->LevelNumber-1;
+	SegmentCompleted = 0;
 }
 
 void LevelCompleted()
@@ -216,6 +220,8 @@ void LevelCompleted()
 
 	if(allAnimals && allFruits && allSecrets)
 	{
+		SegmentCompleted |= 1<<curLevel;
+
 		// Level complete
 		if(!Records.levelsComplete[curLevel])
 		{
@@ -223,15 +229,6 @@ void LevelCompleted()
 			Records.levelsComplete[curLevel] = true;
 			if(episodeFinished != CheckEpisode(Records.levelsComplete, GetEpisode(curLevel)))
 				AwardAchievement(ACHIEVEMENT_CompleteLevel1 + GetEpisode(curLevel));
-		}
-
-		// Arkade mode
-		if(episodeTransition && StartingLevel != -1)
-		{
-			AwardAchievement(ACHIEVEMENT_ArcadeLevel1 + GetEpisode(curLevel));
-
-			if(hard && StartingLevel == 0)
-				AwardAchievement(ACHIEVEMENT_ArcadeGame);
 		}
 
 		// Complete on hard
@@ -243,6 +240,16 @@ void LevelCompleted()
 				if(CheckAll<30>(Records.levelsCompleteHard))
 					AwardAchievement(ACHIEVEMENT_CompleteGame);
 			}
+		}
+
+		// Arkade mode
+		if(episodeTransition && StartingLevel != -1)
+		{
+			if((SegmentCompleted & SegmentMask[GetEpisode(curLevel)]) == SegmentMask[GetEpisode(curLevel)])
+				AwardAchievement(ACHIEVEMENT_ArcadeLevel1 + GetEpisode(curLevel));
+
+			if(hard && curLevel == 28 && StartingLevel == 0 && SegmentCompleted == 0x3FFFFFFF)
+				AwardAchievement(ACHIEVEMENT_ArcadeGame);
 		}
 	}
 
