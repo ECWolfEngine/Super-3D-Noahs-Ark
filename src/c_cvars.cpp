@@ -144,11 +144,6 @@ void FinalReadConfig()
 	SD_SetSoundMode(sd);
 	SD_SetDigiDevice(sds);
 
-	if (!MousePresent)
-		mouseenabled = false;
-	if (!IN_JoyPresent())
-		joystickenabled = false;
-
 	AM_UpdateFlags();
 
 	doWriteConfig = true;
@@ -170,7 +165,7 @@ void ReadConfig(void)
 	config.CreateSetting("ForceGrabMouse", true);
 #endif
 	config.CreateSetting("MouseEnabled", 1);
-	config.CreateSetting("JoystickEnabled", 0);
+	config.CreateSetting("JoystickEnabled", true);
 	config.CreateSetting("ViewSize", 20);
 	config.CreateSetting("MouseXAdjustment", 15);
 	config.CreateSetting("MouseYAdjustment", 15);
@@ -287,10 +282,6 @@ void ReadConfig(void)
 	}
 
 	// make sure values are correct
-
-	if(mouseenabled) mouseenabled=true;
-	if(joystickenabled) joystickenabled=true;
-
 	if (mousexadjustment<0) mousexadjustment = 0;
 	else if (mousexadjustment>20) mousexadjustment = 20;
 
