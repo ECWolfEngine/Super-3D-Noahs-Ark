@@ -54,6 +54,7 @@
 #include "wl_agent.h"
 #include "wl_game.h"
 #include "wl_menu.h"
+#include "wl_play.h"
 #include "thingdef/thingdef.h"
 #include "i_steamworks.h"
 
@@ -660,11 +661,14 @@ void StartConversation(AActor *npc)
 		}
 		else
 		{
+			const int lastoffs = StopMusic();
 			US_ControlPanel(sc_Escape);
 			Menu::closeMenus(false);
 			if(startgame)
 				return;
+			IN_ClearKeysDown();
 			VW_FadeOut();
+			ContinueMusic(lastoffs);
 			quiz.draw();
 			VW_FadeIn();
 		}
