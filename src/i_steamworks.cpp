@@ -73,6 +73,7 @@ enum
 	ACHIEVEMENT_SpeedrunPar
 };
 static void AwardAchievement(int achievement);
+static void ProgressAchievement(int achievement, int progress);
 
 enum { STAT_Animals, STAT_Fruit, STAT_Secrets };
 // Persistent data for tracking progress on certain achievements.
@@ -136,6 +137,15 @@ static bool CheckAll(bool data[N])
 	return true;
 }
 
+template<int N>
+static unsigned int CountBits(bool data[N])
+{
+	unsigned int ret = 0;
+	for(unsigned int i = 0;i < N;++i)
+		ret += data[i] ? 1 : 0;
+	return ret;
+}
+
 // Hooks
 
 static bool SingleSegment = false; // Elegable for Arkcade mode achievements?
@@ -190,6 +200,7 @@ void LevelCompleted()
 		if(!Records.levelsUnderPar[curLevel])
 		{
 			Records.levelsUnderPar[curLevel] = true;
+			ProgressAchievement(ACHIEVEMENT_SpeedrunPar, CountBits<30>(Records.levelsUnderPar));
 			if(CheckAll<30>(Records.levelsUnderPar))
 				AwardAchievement(ACHIEVEMENT_SpeedrunPar);
 		}
@@ -202,18 +213,21 @@ void LevelCompleted()
 	if(allAnimals && !Records.levelsStats[STAT_Animals][curLevel])
 	{
 		Records.levelsStats[STAT_Animals][curLevel] = true;
+		ProgressAchievement(ACHIEVEMENT_AllAnimals, CountBits<30>(Records.levelsStats[STAT_Animals]));
 		if(CheckAll<30>(Records.levelsStats[STAT_Animals]))
 			AwardAchievement(ACHIEVEMENT_AllAnimals);
 	}
 	if(allFruits && !Records.levelsStats[STAT_Fruit][curLevel])
 	{
 		Records.levelsStats[STAT_Fruit][curLevel] = true;
+		ProgressAchievement(ACHIEVEMENT_AllFruits, CountBits<30>(Records.levelsStats[STAT_Fruit]));
 		if(CheckAll<30>(Records.levelsStats[STAT_Fruit]))
 			AwardAchievement(ACHIEVEMENT_AllFruits);
 	}
 	if(allSecrets && !Records.levelsStats[STAT_Secrets][curLevel])
 	{
 		Records.levelsStats[STAT_Secrets][curLevel] = true;
+		ProgressAchievement(ACHIEVEMENT_AllSecrets, CountBits<30>(Records.levelsStats[STAT_Secrets]));
 		if(CheckAll<30>(Records.levelsStats[STAT_Secrets]))
 			AwardAchievement(ACHIEVEMENT_AllSecrets);
 	}
@@ -237,6 +251,7 @@ void LevelCompleted()
 			if(!Records.levelsCompleteHard[curLevel])
 			{
 				Records.levelsCompleteHard[curLevel] = true;
+				ProgressAchievement(ACHIEVEMENT_CompleteGame, CountBits<30>(Records.levelsCompleteHard));
 				if(CheckAll<30>(Records.levelsCompleteHard))
 					AwardAchievement(ACHIEVEMENT_CompleteGame);
 			}
@@ -273,6 +288,7 @@ void QuestionAnswered(int num)
 	if(!Records.questionsAnswered[num])
 	{
 		Records.questionsAnswered[num] = true;
+		ProgressAchievement(ACHIEVEMENT_Theologian, CountBits<99>(Records.questionsAnswered));
 		if(CheckAll<99>(Records.questionsAnswered))
 			AwardAchievement(ACHIEVEMENT_Theologian);
 	}
@@ -286,6 +302,7 @@ void QuestionAnswered(int num)
 namespace SteamWorks {
 
 static void AwardAchievement(int) {}
+static void ProgressAchievement(int, int) {}
 
 void AsyncTick() {}
 
