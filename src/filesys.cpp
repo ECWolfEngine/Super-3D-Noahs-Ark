@@ -593,10 +593,10 @@ bool File::remove()
 	{
 		wchar_t wname[MAX_PATH];
 		FileSys::ConvertName(fn, wname);
-		return DeleteFileW(wname);
+		return DeleteFileW(wname) != 0;
 	}
 	else
-		return DeleteFileA(fn);
+		return DeleteFileA(fn) != 0;
 #else
 	return unlink(fn) == 0;
 #endif
