@@ -541,8 +541,6 @@ static void DetermineIntermissionMode()
 
 void LevelCompleted (void)
 {
-	SteamWorks::LevelCompleted();
-
 	DetermineIntermissionMode();
 
 	InterState.bonus = 0;

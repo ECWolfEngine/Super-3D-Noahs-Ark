@@ -35,6 +35,8 @@
 #ifndef __I_STEAMWORKS_H__
 #define __I_STEAMWORKS_H__
 
+class FString;
+
 namespace SteamWorks {
 
 void AsyncTick();
@@ -46,7 +48,7 @@ void Shutdown();
 void CheatsEnabled();
 void GameLoaded();
 void NewGame();
-void LevelCompleted();
+void LevelCompleted(FString next);
 void QuestionAnswered(int number);
 
 }

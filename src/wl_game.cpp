@@ -31,6 +31,7 @@
 #include "colormatcher.h"
 #include "thingdef/thingdef.h"
 #include "doomerrors.h"
+#include "i_steamworks.h"
 
 #ifdef MYPROFILE
 #include <TIME.H>
@@ -915,6 +916,7 @@ restartgame:
 						{
 							if(levelInfo->ForceTally)
 							{
+								SteamWorks::LevelCompleted(next); // S3DNA
 								LevelCompleted();
 								VW_FadeOut();
 							}
@@ -958,7 +960,10 @@ restartgame:
 
 				StartTravel ();
 				if(dointermission)
+				{
+					SteamWorks::LevelCompleted(next); // S3DNA
 					LevelCompleted ();              // do the intermission
+				}
 
 				LevelInfo &nextLevel = LevelInfo::Find(next);
 				if(nextLevel.Cluster != levelInfo->Cluster)

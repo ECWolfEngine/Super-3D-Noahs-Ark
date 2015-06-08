@@ -166,7 +166,7 @@ void NewGame()
 	SegmentCompleted = 0;
 }
 
-void LevelCompleted()
+void LevelCompleted(FString next)
 {
 	if(!AchievementsEnabled)
 		return; // Cheater!
@@ -175,14 +175,14 @@ void LevelCompleted()
 	if(curLevel < 0 || curLevel > 29)
 		return;
 
-	const LevelInfo &nextLevel = LevelInfo::Find(levelInfo->NextMap);
+	const LevelInfo &nextLevel = LevelInfo::Find(next);
 	bool episodeTransition = nextLevel.Cluster != levelInfo->Cluster;
 	bool hard = gamestate.difficulty->PlayerDamageFactor == FRACUNIT;
 
 	// Check for basic finishing achievement.
 	if(!Records.levelsFinished[curLevel])
 	{
-		bool episodeFinished = CheckEpisode(Records.levelsFinished, GetEpisode(curLevel));
+		bool episodeFinished = CheckEpisode(Records.levelsFinished, GetEpisode(curLevel), true);
 		Records.levelsFinished[curLevel] = true;
 		if(curLevel != MAP_Secret1 && curLevel != MAP_Secret2 &&
 			(episodeFinished != CheckEpisode(Records.levelsFinished, GetEpisode(curLevel), true)))
