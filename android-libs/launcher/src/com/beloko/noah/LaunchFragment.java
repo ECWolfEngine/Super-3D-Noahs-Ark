@@ -1,5 +1,11 @@
 package com.beloko.noah;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.Iterator;
 
@@ -22,6 +28,7 @@ import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.RadioGroup.OnCheckedChangeListener;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.beloko.idtech.AppSettings;
 import com.beloko.idtech.GD;
@@ -52,6 +59,9 @@ public class LaunchFragment extends Fragment{
 
 		fullBaseDir = getActivity().getFilesDir().toString();
 
+		AppSettings.createDirectories(getActivity());
+
+		loadArgs();
 	}                                          
 
 	@Override
@@ -154,8 +164,10 @@ public class LaunchFragment extends Fragment{
 	void startGame(final String base)
 	{
 		//Check prboom wad exists
-		//File ecwolfpk3 = new File(base + "/ecwolf.pk3"  );
-		//if (!ecwolfpk3.exists())
+		{
+			Utils.copyAsset(getActivity(),"noah3d.pk3",base);
+			Utils.copyAsset(getActivity(),"noah3d.wad",base);
+		}
 
 
 		String extraArgs = argsEditText.getText().toString().trim();
@@ -173,7 +185,7 @@ public class LaunchFragment extends Fragment{
 				argsHistory.remove(argsHistory.size()-1);
 
 			argsHistory.add(0, extraArgs);
-
+			saveArgs();
 		} 
 
 		String args =  gameArgsTextView.getText().toString() + " " + argsEditText.getText().toString();
@@ -191,6 +203,53 @@ public class LaunchFragment extends Fragment{
 	}                  
 
 
+	void loadArgs()                         
+	{ 
+		File cacheDir = getActivity().getFilesDir();
+
+		FileInputStream fis = null;
+		ObjectInputStream in = null;
+		try
+		{
+			fis = new FileInputStream(new File(cacheDir,"args_hist.dat"));
+			in = new ObjectInputStream(fis);                
+			argsHistory = (ArrayList<String>)in.readObject();
+			in.close();
+			return;
+		}
+		catch(IOException ex)
+		{
+
+		}  
+		catch(ClassNotFoundException ex)
+		{
+
+		}
+
+		//failed load, load default
+		argsHistory = new ArrayList<String>();
+	}  
 
 
+	void saveArgs()
+	{
+		File cacheDir =  getActivity().getFilesDir();
+
+		if (!cacheDir.exists())
+			cacheDir.mkdirs();
+
+		FileOutputStream fos = null;
+		ObjectOutputStream out = null;
+		try
+		{
+			fos = new FileOutputStream(new File(cacheDir,"args_hist.dat"));
+			out = new ObjectOutputStream(fos);
+			out.writeObject(argsHistory);
+			out.close();
+		}
+		catch(IOException ex)         
+		{
+			Toast.makeText(getActivity(),"Error saving args History list: " + ex.toString(), Toast.LENGTH_LONG).show();
+		}
+	}
 }
