@@ -55,7 +55,7 @@ bool unscaledweapons = false;
 bool alwaysrun;
 bool mouseenabled, mouseyaxisdisabled, joystickenabled;
 
-#if SDL_VERSION_ATLEAST(2,0,0)
+#if SDL_VERSION_ATLEAST(1,3,0)
 // Convert SDL1 keycode to SDL2 scancode
 static const SDL_Scancode SDL2ConversionTable[323] = {
 	SDL_SCANCODE_UNKNOWN,SDL_SCANCODE_UNKNOWN,SDL_SCANCODE_UNKNOWN,SDL_SCANCODE_UNKNOWN,SDL_SCANCODE_UNKNOWN,SDL_SCANCODE_UNKNOWN,SDL_SCANCODE_UNKNOWN,SDL_SCANCODE_UNKNOWN,
