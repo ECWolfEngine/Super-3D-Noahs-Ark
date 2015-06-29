@@ -639,6 +639,8 @@ void CheckKeys (void)
 		if (Keyboard[sc_J] && Keyboard[sc_I] && Keyboard[sc_M])
 		{
 			DebugGod(true);
+
+			SteamWorks::CheatsEnabled();
 		}
 	}
 

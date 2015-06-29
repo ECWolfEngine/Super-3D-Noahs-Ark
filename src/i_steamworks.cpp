@@ -36,6 +36,7 @@
 #include "i_steamworks.h"
 #include "id_ca.h"
 #include "g_mapinfo.h"
+#include "wl_agent.h"
 #include "wl_def.h"
 #include "wl_game.h"
 #include "zstring.h"
@@ -159,6 +160,8 @@ static bool AchievementsEnabled = true;
 void CheatsEnabled()
 {
 	AchievementsEnabled = false;
+
+	players[0].flags |= player_t::PF_CHEATER;
 }
 
 // Starting level number constants for each episode
@@ -268,6 +271,9 @@ void GameLoaded()
 	SingleSegment = false;
 	StartingLevel = -1;
 	SegmentCompleted = 0;
+
+	if(players[0].flags & player_t::PF_CHEATER)
+		CheatsEnabled();
 }
 
 void NewGame()
