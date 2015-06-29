@@ -73,18 +73,84 @@ enum
 	ACHIEVEMENT_SpeedrunPar
 };
 static void AwardAchievement(int achievement);
+static bool CheckAchievement(int achievement);
 static void ProgressAchievement(int achievement, int progress);
+
+static bool RecordsDirty = false;
+struct StatBool
+{
+	bool value;
+
+	operator bool() const { return value; }
+	const StatBool &operator=(bool set)
+	{
+		RecordsDirty = true;
+		value = set;
+		return *this;
+	}
+};
+
+static void PackBits(char* dest, const StatBool* input, unsigned int N)
+{
+	for(unsigned int i = 0;i < N;i += 8)
+	{
+		if(i + 8 <= N)
+		{
+			*dest++ = (char)(
+				(BYTE(input[i]))|
+				(BYTE(input[i+1])<<1)|
+				(BYTE(input[i+2])<<2)|
+				(BYTE(input[i+3])<<3)|
+				(BYTE(input[i+4])<<4)|
+				(BYTE(input[i+5])<<5)|
+				(BYTE(input[i+6])<<6)|
+				(BYTE(input[i+7])<<7));
+		}
+		else
+		{
+			*dest = (char)(input[i]);
+			for(unsigned int j = i+1;j < N;++j)
+				*dest = (char)(BYTE(*dest)|(BYTE(input[j])<<(j-i)));
+		}
+	}
+}
+
+static void UnpackBits(StatBool* dest, const char* input, unsigned int N)
+{
+	for(unsigned int i = 0;i < N;++i)
+		(*dest++).value = (BYTE(input[i/8])>>(i&7))&1;
+}
 
 enum { STAT_Animals, STAT_Fruit, STAT_Secrets };
 // Persistent data for tracking progress on certain achievements.
 static struct AchievementRecords
 {
-	bool levelsFinished[30];
-	bool levelsStats[3][30];
-	bool levelsComplete[30]; // Requires all 3 of the above simultaneously
-	bool levelsCompleteHard[30];
-	bool levelsUnderPar[30];
-	bool questionsAnswered[99];
+	StatBool levelsFinished[30];
+	StatBool levelsStats[3][30];
+	StatBool levelsComplete[30]; // Requires all 3 of the above simultaneously
+	StatBool levelsCompleteHard[30];
+	StatBool levelsUnderPar[30];
+	StatBool questionsAnswered[99];
+
+	void Read(const char buffer[41])
+	{
+		UnpackBits(levelsFinished, buffer, 30);
+		UnpackBits(levelsStats[0], buffer+4, 30*3);
+		UnpackBits(levelsComplete, buffer+16, 30);
+		UnpackBits(levelsCompleteHard, buffer+20, 30);
+		UnpackBits(levelsUnderPar, buffer+24, 30);
+		UnpackBits(questionsAnswered, buffer+28, 99);
+	}
+
+	void Serialize(char buffer[41]) const
+	{
+		PackBits(buffer, levelsFinished, 30);
+		PackBits(buffer+4, levelsStats[0], 30*3);
+		PackBits(buffer+16, levelsComplete, 30);
+		PackBits(buffer+20, levelsCompleteHard, 30);
+		PackBits(buffer+24, levelsUnderPar, 30);
+		PackBits(buffer+28, questionsAnswered, 99);
+	}
 } Records;
 
 static bool SteamActive = false;
@@ -113,7 +179,7 @@ static int GetEpisode(int level)
 	return 5;
 }
 
-static bool CheckEpisode(bool data[30], int episode, bool ignoreSecrets=false)
+static bool CheckEpisode(StatBool data[30], int episode, bool ignoreSecrets=false)
 {
 	for(int i = LevelTable[episode];i < LevelTable[episode+1];++i)
 	{
@@ -127,7 +193,7 @@ static bool CheckEpisode(bool data[30], int episode, bool ignoreSecrets=false)
 }
 
 template<int N>
-static bool CheckAll(bool data[N])
+static bool CheckAll(StatBool data[N])
 {
 	for(unsigned int i = 0;i < N;++i)
 	{
@@ -138,12 +204,57 @@ static bool CheckAll(bool data[N])
 }
 
 template<int N>
-static unsigned int CountBits(bool data[N])
+static unsigned int CountBits(StatBool data[N])
 {
 	unsigned int ret = 0;
 	for(unsigned int i = 0;i < N;++i)
 		ret += data[i] ? 1 : 0;
 	return ret;
+}
+
+// In case of failure, certain achievements can imply certain stats. Restoring
+// some of these have pretty debatable use, but for example the levelStats
+// implied by episode completion can keep progress indicators accurate.
+static void RecoverStats()
+{
+	for(int i = 0;i < 6;++i)
+	{
+		if(CheckAchievement(ACHIEVEMENT_FinishLevel1 + i))
+		{
+			for(int j = LevelTable[i];j < LevelTable[i+1];++j)
+			{
+				if(j == MAP_Secret1 || j == MAP_Secret2)
+					continue;
+				Records.levelsFinished[j] = true;
+			}
+		}
+
+		if(CheckAchievement(ACHIEVEMENT_CompleteLevel1 + i))
+		{
+			for(int j = LevelTable[i];j < LevelTable[i+1];++j)
+			{
+				Records.levelsComplete[j] = true;
+				Records.levelsStats[STAT_Animals][j] = Records.levelsStats[STAT_Fruit][j] = Records.levelsStats[STAT_Secrets][j] = true;
+			}
+		}
+	}
+
+	if(CheckAchievement(ACHIEVEMENT_FinishSecret1))
+		Records.levelsFinished[MAP_Secret1] = true;
+	if(CheckAchievement(ACHIEVEMENT_FinishSecret2))
+		Records.levelsFinished[MAP_Secret2] = true;
+
+	if(CheckAchievement(ACHIEVEMENT_CompleteGame))
+	{
+		for(int i = 0;i < 30;++i)
+			Records.levelsCompleteHard[i] = true;
+	}
+
+	if(CheckAchievement(ACHIEVEMENT_SpeedrunPar))
+	{
+		for(int i = 0;i < 30;++i)
+			Records.levelsUnderPar[i] = true;
+	}
 }
 
 // Hooks
@@ -302,6 +413,7 @@ void QuestionAnswered(int num)
 namespace SteamWorks {
 
 static void AwardAchievement(int) {}
+static bool CheckAchievement(bool) { return false; }
 static void ProgressAchievement(int, int) {}
 
 void AsyncTick() {}
