@@ -220,6 +220,15 @@ static unsigned int CountBits(StatBool data[N])
 // implied by episode completion can keep progress indicators accurate.
 static void RecoverStats()
 {
+	// If the recorded stats for completed and completedhard match then it might
+	// be reasonable to assume that they were playing on hard.
+	bool transferComplete = CountBits<30>(Records.levelsCompleteHard) > 0;
+	for(int i = 0;i < 30;++i)
+	{
+		if(Records.levelsComplete[i] != Records.levelsCompleteHard[i])
+			transferComplete = false;
+	}
+
 	for(int i = 0;i < 6;++i)
 	{
 		if(CheckAchievement(ACHIEVEMENT_FinishLevel1 + i))
@@ -238,6 +247,9 @@ static void RecoverStats()
 			{
 				Records.levelsComplete[j] = true;
 				Records.levelsStats[STAT_Animals][j] = Records.levelsStats[STAT_Fruit][j] = Records.levelsStats[STAT_Secrets][j] = true;
+
+				if(transferComplete)
+					Records.levelsCompleteHard[j] = true;
 			}
 		}
 	}
