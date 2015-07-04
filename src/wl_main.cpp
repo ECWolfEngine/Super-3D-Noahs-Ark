@@ -518,6 +518,39 @@ static void InitGame()
 	if (Keyboard[sc_M])
 		DoJukebox();
 
+	// Noah3D: First run determine if using joystick.
+	// I'm tired of watching people drift in videos since they have a joystick
+	// plugged in that they're not using.
+	if (config.IsNewConfig() && IN_JoyPresent())
+	{
+		WindowX = WindowY = 0;
+		WindowW = 320;
+		WindowH = 200;
+		screen->Lock(false);
+		Message("Use game controller?\n\nPress a button to activate\nor press any key to continue.");
+		screen->Unlock();
+		VH_UpdateScreen();
+
+		while(true)
+		{
+			ControlInfo ci;
+			ReadAnyControl(&ci);
+			
+			if(IN_JoyButtons())
+			{
+				joystickenabled = true;
+				break;
+			}
+
+			if(IN_MouseButtons() || LastScan)
+			{
+				joystickenabled = false;
+				break;
+			}
+			SDL_Delay(5);
+		}
+	}
+
 #ifdef NOTYET
 	vdisp = (byte *) (0xa0000+PAGE1START);
 	vbuf = (byte *) (0xa0000+PAGE2START);
