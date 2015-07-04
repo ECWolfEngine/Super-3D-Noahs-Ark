@@ -497,7 +497,8 @@ void CreateMenus()
 	displayMenu.addItem(new MenuSwitcherMenuItem(language["STR_SELECTRES"], resolutionMenu, EnterResolutionSelection));
 #endif
 	displayMenu.addItem(new LabelMenuItem(language["STR_SCREENSIZE"]));
-	displayMenu.addItem(new SliderMenuItem(viewsize, 110, 21, language["STR_SMALL"], language["STR_LARGE"], AdjustViewSize));
+	// Noah3D: Limit the menu to 20 since people maximize this value and wonder where the status bar went.
+	displayMenu.addItem(new SliderMenuItem(viewsize, 110, 20, language["STR_SMALL"], language["STR_LARGE"], AdjustViewSize));
 
 	resolutionMenu.setHeadText(language["STR_SELECTRES"]);
 
