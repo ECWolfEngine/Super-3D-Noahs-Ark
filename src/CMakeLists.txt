@@ -10,6 +10,8 @@ add_custom_target(revision_check ALL
 	DEPENDS updaterevision
 )
 
+set(PLATFORM_EXE_FLAGS "")
+
 include(CheckCXXSourceCompiles)
 include(CheckFunctionExists)
 include(FindPkgConfig)
@@ -95,15 +97,14 @@ if(WIN32)
 		set(EXTRA_FILES ${ECWolf_SOURCE_DIR}/src/win32/windows.rc)
 	endif(CMAKE_COMPILER_IS_GNUCXX)
 
+	set(PLATFORM_EXE_FLAGS WIN32)
+
 	set(EXTRA_FILES
 		${EXTRA_FILES}
 		win32/i_crash.cpp
 		win32/i_main.cpp
 		win32/wl_iwad_win32.cpp
 	)
-	if(${SDL_VERSION_STRING} VERSION_LESS "2.0.0")
-		set(EXTRA_FILES ${EXTRA_FILES} sdl_winmain.cpp)
-	endif()
 elseif(APPLE OR ANDROID)
 	set(NO_GTK ON)
 else(WIN32)
@@ -152,8 +153,6 @@ elseif(ANDROID)
 	add_definitions(-Dmalloc_usable_size=dlmalloc_usable_size)
 
 	set(EXTRA_LIBRARIES ${EXTRA_LIBRARIES} ${TOUCHCONTROLS_LIBRARY} log)
-else(APPLE)
-	set(PLATFORM_EXE_FLAGS "")
 endif(APPLE)
 
 # Steamworks for S3DNA
