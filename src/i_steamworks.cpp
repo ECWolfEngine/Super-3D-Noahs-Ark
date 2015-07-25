@@ -431,7 +431,7 @@ void QuestionAnswered(int num)
 namespace SteamWorks {
 
 static void AwardAchievement(int) {}
-static bool CheckAchievement(bool) { return false; }
+static bool CheckAchievement(int) { return false; }
 static void ProgressAchievement(int, int) {}
 
 void AsyncTick() {}
