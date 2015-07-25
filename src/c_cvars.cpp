@@ -50,7 +50,7 @@ bool vid_fullscreen = false;
 bool vid_vsync = false;
 bool quitonescape = false;
 fixed movebob = FRACUNIT;
-bool unscaledweapons = false;
+bool unscaledweapons = true;
 
 bool alwaysrun;
 bool mouseenabled, mouseyaxisdisabled, joystickenabled;
@@ -204,7 +204,7 @@ void ReadConfig(void)
 	config.CreateSetting("AM_OverlayTextured", false);
 	config.CreateSetting("AM_Pause", true);
 	config.CreateSetting("AM_ShowRatios", false);
-	config.CreateSetting("UnscaledWeapons", false);
+	config.CreateSetting("UnscaledWeapons", true);
 
 	char joySettingName[50] = {0};
 	char keySettingName[50] = {0};
