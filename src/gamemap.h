@@ -144,8 +144,9 @@ class GameMap
 			struct Map
 			{
 				Map() : tile(NULL), sector(NULL), zone(NULL), visible(false),
-					amFlags(0), thinker(NULL), pushDirection(Tile::East),
-					pushAmount(0), pushReceptor(NULL), tag(0), nexttag(NULL)
+					amFlags(0), thinker(NULL), slideStyle(0),
+					pushDirection(Tile::East), pushAmount(0),
+					pushReceptor(NULL), tag(0), nexttag(NULL)
 				{
 					slideAmount[0] = slideAmount[1] = slideAmount[2] = slideAmount[3] = 0;
 					sideSolid[0] = sideSolid[1] = sideSolid[2] = sideSolid[3] = true;
@@ -210,6 +211,8 @@ class GameMap
 		unsigned int	GetSectorIndex(const Sector *sector) const;
 
 		static bool		CheckMapExists(const FString &map);
+
+		void PropagateMark();
 
 		TMap<unsigned int, Plane::Map *> elevatorPosition;
 	private:

@@ -122,6 +122,10 @@ public:
 	static IntermissionInfo *Find(const FName &name);
 
 	IntermissionInfo() : Link(NAME_None) {}
+	// Clear on destruct requires move semantics
+	//~IntermissionInfo() { Clear(); }
+
+	void Clear();
 
 	enum ActionType
 	{
