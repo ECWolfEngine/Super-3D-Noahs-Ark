@@ -33,6 +33,11 @@
 **
 */
 
+#if !defined(_WIN32) && !defined(__sun)
+#if !defined(__ANDROID__) || (__ANDROID_API__ >= 21)
+#define USE_FTS 1
+#endif
+#endif
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -41,7 +46,7 @@
 #define stat _stat
 #else
 #include <dirent.h>
-#ifndef __sun
+#ifdef USE_FTS
 #include <fts.h>
 #endif
 #endif
@@ -84,8 +89,6 @@ class FDirectory : public FResourceFile
 {
 	TArray<FDirectoryLump> Lumps;
 
-	static int STACK_ARGS lumpcmp(const void * a, const void * b);
-
 	int AddDirectory(const char *dirpath);
 	void AddEntry(const char *fullpath, int size);
 
@@ -122,20 +125,6 @@ FDirectory::FDirectory(const char * directory)
 	Filename = cFilename;
 }
 
-
-//==========================================================================
-//
-//
-//
-//==========================================================================
-
-int STACK_ARGS FDirectory::lumpcmp(const void * a, const void * b)
-{
-	FDirectoryLump * rec1 = (FDirectoryLump *)a;
-	FDirectoryLump * rec2 = (FDirectoryLump *)b;
-
-	return stricmp(rec1->FullName, rec2->FullName);
-}
 
 #ifdef _WIN32
 //==========================================================================
@@ -199,7 +188,7 @@ int FDirectory::AddDirectory(const char *dirpath)
 	return count;
 }
 
-#elif defined(__sun)
+#elif !defined(USE_FTS)
 
 int FDirectory::AddDirectory(const char *dirpath)
 {
@@ -300,8 +289,7 @@ bool FDirectory::Open(bool quiet)
 {
 	NumLumps = AddDirectory(Filename);
 	if (!quiet) Printf(", %d lumps\n", NumLumps);
-	// Entries in Zips are sorted alphabetically.
-	qsort(&Lumps[0], NumLumps, sizeof(FDirectoryLump), lumpcmp);
+	PostProcessArchive(&Lumps[0], sizeof(FDirectoryLump));
 	return true;
 }
 

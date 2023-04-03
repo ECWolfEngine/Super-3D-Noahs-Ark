@@ -158,7 +158,7 @@ struct FVSwapSound : public FResourceLump
 const char FVSwapSound::WAV_HEADER[44] = {
 	'R','I','F','F',0,0,0,0,'W','A','V','E',
 	'f','m','t',' ',16,0,0,0,1,0,1,0,
-	(char)0x82,0x17,0,0,0x37,0x04,0,0,1,0,16,0,
+	(char)0x82,0x17,0,0,0x37,0x04,0,0,2,0,16,0,
 	'd','a','t','a',0,0,0,0
 };
 
@@ -200,7 +200,7 @@ class FVSwap : public FResourceFile
 			for(unsigned int i = 0;i < soundStart;i++)
 			{
 				char lumpname[9];
-				sprintf(lumpname, "VSP%05d", i);
+				mysnprintf(lumpname, 9, "VSP%05d", i);
 
 				Lumps[i].Owner = this;
 				Lumps[i].LumpNameSetup(lumpname);
@@ -231,7 +231,7 @@ class FVSwap : public FResourceFile
 				}
 
 				char lumpname[9];
-				sprintf(lumpname, "VSP%05d", i+soundStart);
+				mysnprintf(lumpname, 9, "VSP%05d", i+soundStart);
 				SoundLumps[i] = new FVSwapSound(end-start);
 				SoundLumps[i]->Owner = this;
 				SoundLumps[i]->LumpNameSetup(lumpname);

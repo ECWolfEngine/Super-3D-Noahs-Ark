@@ -8,12 +8,11 @@
 #ifndef __ID_SD__
 #define __ID_SD__
 
-#include <SDL_mixer.h>
-
 #include "wl_def.h"
+#include "dobject.h"
 #include "sndinfo.h"
 
-#define alOut(n,b) 		YM3812Write(oplChip, n, b, AdlibVolume)
+#define alOut(n,b) 		YM3812Write(oplChip, n, b, AdlibVolumePositioned)
 #define alOutMusic(n,b)	YM3812Write(oplChip, n, b, MusicVolume)
 
 typedef enum
@@ -24,7 +23,7 @@ typedef enum
 
 typedef enum
 {
-	smm_Off,smm_AdLib
+	smm_Off,smm_AdLib,smm_Midi
 } SMMode;
 
 typedef enum
@@ -106,28 +105,31 @@ typedef struct
 	word    length;
 	word    values[1];
 } MusicGroup;
-
-typedef struct
-{
-	int valid;
-	fixed globalsoundx, globalsoundy;
-} globalsoundpos;
 #pragma pack(pop)
 
+struct globalsoundpos
+{
+	TObjPtr<AActor> source;
+	fixed globalsoundx, globalsoundy;
+	bool valid, positioned;
+};
+
 extern globalsoundpos channelSoundPos[];
+extern globalsoundpos AdlibSoundPos;
 
 // Global variables
 extern  bool			AdLibPresent,
-						SoundBlasterPresent,
-						SoundPositioned;
+						SoundBlasterPresent;
 extern  SDMode          SoundMode;
 extern  SDSMode         DigiMode;
 extern  SMMode          MusicMode;
+extern  bool            N3DTempoEmulation;
 static const int MAX_VOLUME = 20;
 static inline double MULTIPLY_VOLUME(const int &v)
 {
 	return (double(v)+0.3)/(MAX_VOLUME+0.3);
 }
+extern	int				AdlibVolumePositioned;
 extern	int				AdlibVolume;
 extern	int				MusicVolume;
 extern	int				SoundVolume;
@@ -141,15 +143,6 @@ enum SoundChannel
 	SD_BOSSWEAPONS
 };
 
-extern	Mix_Music		*music;
-
-#define GetTimeCount()  ((SDL_GetTicks()*7)/100)
-
-inline void Delay(int wolfticks)
-{
-	if(wolfticks>0) SDL_Delay(wolfticks * 100 / 7);
-}
-
 // Function prototypes
 extern  void    SD_Startup(void),
 				SD_Shutdown(void);
@@ -157,14 +150,13 @@ extern  void    SD_Startup(void),
 extern  void    SD_PositionSound(int leftvol,int rightvol);
 extern  int		SD_PlaySound(const char* sound,SoundChannel chan=SD_GENERIC);
 extern  void    SD_SetPosition(int channel, int leftvol,int rightvol);
-extern  void    SD_StopSound(void),
-				SD_WaitSoundDone(void);
+extern  void    SD_StopSound(void);
+extern  void    SD_WaitSoundDone(void);
 
 extern  void    SD_StartMusic(const char* chunk);
-extern  int     SD_PauseMusic(void);
 extern  void    SD_ContinueMusic(const char* chunk, int startoffs);
-extern  void    SD_MusicOn(void),
-				SD_FadeOutMusic(void);
+extern  void    SD_MusicOn(void);
+extern  void    SD_FadeOutMusic(void);
 extern  int     SD_MusicOff(void);
 
 extern  bool	SD_MusicPlaying(void);
@@ -173,8 +165,7 @@ extern  bool	SD_SetMusicMode(SMMode mode);
 extern  bool    SD_SoundPlaying(void);
 
 extern  void    SD_SetDigiDevice(SDSMode);
-extern  byte*	SD_PrepareSound(int which);
-extern  int     SD_PlayDigitized(const SoundData &which,int leftpos,int rightpos,SoundChannel chan=SD_GENERIC);
+extern  struct Mix_Chunk *SD_PrepareSound(int which);
 extern  void    SD_StopDigitized(void);
 
 #endif

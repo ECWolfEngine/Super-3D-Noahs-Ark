@@ -1,3 +1,4 @@
+#pragma once
 /*
 ** tarray.h
 ** Templated, automatically resizing array
@@ -30,10 +31,21 @@
 ** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 **---------------------------------------------------------------------------
 **
+** NOTE: TArray takes advantage of the assumption that the contained type is
+** able to be trivially moved. The definition of trivially movable by the C++
+** standard is more strict than the actual set of types that can be moved with
+** memmove. For example, FString uses non-trivial constructors/destructor in
+** order to maintain the reference count, but can be "safely" by passed if the
+** opaque destructor call is avoided. Similarly types like TArray itself which
+** only null the owning pointers when moving which can be skipped if the
+** destructor is not called.
+**
+** It is possible that with LTO TArray could be made safe for non-trivial types,
+** but we don't wish to rely on LTO to reach expected performance. The set of
+** types which can not be contained by TArray as a result of this choice is
+** actually extremely small.
+**
 */
-
-#ifndef __TARRAY_H__
-#define __TARRAY_H__
 
 #include <stdlib.h>
 #include <assert.h>
@@ -48,6 +60,15 @@
 #include "m_alloc.h"
 
 class FArchive;
+
+template<class T>
+struct TMoveInsert
+{
+	explicit TMoveInsert(void *loc, const T &obj)
+	{
+		::new (loc) T(obj);
+	}
+};
 
 // TArray -------------------------------------------------------------------
 
@@ -132,7 +153,7 @@ public:
 	unsigned int Push (const T &item)
 	{
 		Grow (1);
-		::new((void*)&Array[Count]) T(item);
+		(void)TMoveInsert<T>(&Array[Count], item);
 		return Count++;
 	}
 	bool Pop (T &item)
@@ -152,7 +173,8 @@ public:
 			Array[index].~T();
 			if (index < --Count)
 			{
-				memmove (&Array[index], &Array[index+1], sizeof(T)*(Count - index));
+				// Cast to void to assume trivial move
+				memmove ((void*)&Array[index], (const void*)&Array[index+1], sizeof(T)*(Count - index));
 			}
 		}
 	}
@@ -169,7 +191,8 @@ public:
 			Count -= deletecount;
 			if (index < Count)
 			{
-				memmove (&Array[index], &Array[index+deletecount], sizeof(T)*(Count - index));
+				// Cast to void to assume trivial move
+				memmove ((void*)&Array[index], (const void*)&Array[index+deletecount], sizeof(T)*(Count - index));
 			}
 		}
 	}
@@ -182,7 +205,7 @@ public:
 			// Inserting somewhere past the end of the array, so we can
 			// just add it without moving things.
 			Resize (index + 1);
-			::new ((void *)&Array[index]) T(item);
+			(void)TMoveInsert<T>(&Array[index], item);
 		}
 		else
 		{
@@ -191,10 +214,11 @@ public:
 			Resize (Count + 1);
 
 			// Now move items from the index and onward out of the way
-			memmove (&Array[index+1], &Array[index], sizeof(T)*(Count - index - 1));
+			// Cast to void to assume trivial move
+			memmove ((void*)&Array[index+1], (const void*)&Array[index], sizeof(T)*(Count - index - 1));
 
 			// And put the new element in
-			::new ((void *)&Array[index]) T(item);
+			(void)TMoveInsert<T>(&Array[index], item);
 		}
 	}
 	void ShrinkToFit ()
@@ -237,7 +261,7 @@ public:
 			Grow (amount - Count);
 			for (unsigned int i = Count; i < amount; ++i)
 			{
-				::new((void *)&Array[i]) T;
+				::new ((void *)&Array[i]) T;
 			}
 		}
 		else if (Count != amount)
@@ -256,7 +280,7 @@ public:
 		Count += amount;
 		for (unsigned int i = place; i < Count; ++i)
 		{
-			::new((void *)&Array[i]) T;
+			::new ((void *)&Array[i]) T;
 		}
 		return place;
 	}
@@ -314,6 +338,8 @@ private:
 	}
 };
 
+// Use TArray<TUniquePtr>
+#if 0
 // TDeletingArray -----------------------------------------------------------
 // An array that deletes its elements when it gets deleted.
 template<class T, class TT=T>
@@ -329,6 +355,7 @@ public:
 		}
 	}
 };
+#endif
 
 // TAutoGrowArray -----------------------------------------------------------
 // An array with accessors that automatically grow the array as needed.
@@ -551,7 +578,7 @@ public:
 		else
 		{
 			n = NewKey(key);
-			::new(&n->Pair.Value) VT(value);
+			(void)TMoveInsert<VT>(&n->Pair.Value, value);
 		}
 		return n->Pair.Value;
 	}
@@ -653,7 +680,7 @@ protected:
 			if (!nold[i].IsNil())
 			{
 				Node *n = NewKey(nold[i].Pair.Key);
-				::new(&n->Pair.Value) VT(nold[i].Pair.Value);
+				(void)TMoveInsert<VT>(&n->Pair.Value, nold[i].Pair.Value);
 				nold[i].~Node();
 			}
 		}
@@ -721,7 +748,7 @@ protected:
 			mp->Next = NULL;
 		}
 		++NumUsed;
-		::new(&mp->Pair.Key) KT(key);
+		(void)TMoveInsert<KT>(&mp->Pair.Key, key);
 		return mp;
 	}
 
@@ -907,5 +934,3 @@ protected:
 	const MapType &Map;
 	hash_t Position;
 };
-
-#endif //__TARRAY_H__

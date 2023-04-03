@@ -38,6 +38,7 @@
 #include "wl_play.h"
 #include "wl_game.h"
 #include "wl_loadsave.h"
+#include "wl_net.h"
 #include "dobject.h"
 #include "colormatcher.h"
 #include "version.h"
@@ -97,15 +98,11 @@ int      statusbarx;
 int      statusbary1, statusbary2;
 short    centerx;
 short    centerxwide;
-int      shootdelta;           // pixels away from centerx a target can be
 fixed    scale;
 fixed    pspritexscale;
 fixed    pspriteyscale;
 fixed    yaspect;
 int32_t  heightnumerator;
-
-
-void    Quit (const char *error,...);
 
 bool	startgame;
 bool	loadedgame;
@@ -138,16 +135,22 @@ int     param_audiobuffer = 2048 / (44100 / param_samplerate);
 =====================
 */
 
-void NewGame (int difficulty, const FString &map, bool displayBriefing, const ClassDef *playerClass)
+void NewGame (int difficulty, FString map, bool displayBriefing, FName playerClass)
 {
-	if(!playerClass)
-		playerClass = ClassDef::FindClass(gameinfo.PlayerClasses[0]);
+	// void cast can be removed when we move to C++11
+	memset ((void*)&gamestate,0,sizeof(gamestate));
 
-	memset (&gamestate,0,sizeof(gamestate));
+	FName playerClassNames[MAXPLAYERS];
+	playerClassNames[ConsolePlayer] = playerClass != NAME_None ? playerClass : gameinfo.PlayerClasses[0];
+
+	Net::NewGame(difficulty, map, playerClassNames);
+
 	gamestate.difficulty = &SkillInfo::GetSkill(difficulty);
 	strncpy(gamestate.mapname, map, 8);
 	gamestate.mapname[8] = 0;
-	gamestate.playerClass = playerClass;
+	for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
+		gamestate.playerClass[i] = ClassDef::FindClass(playerClassNames[i]);
+
 	levelInfo = &LevelInfo::Find(map);
 
 	if(displayBriefing)
@@ -157,7 +160,8 @@ void NewGame (int difficulty, const FString &map, bool displayBriefing, const Cl
 	LevelRatios.killratio = LevelRatios.secretsratio = LevelRatios.treasureratio =
 		LevelRatios.numLevels = LevelRatios.time = 0;
 
-	players[0].state = player_t::PST_ENTER;
+	for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
+		players[i].state = player_t::PST_ENTER;
 
 	Dialog::ClearConversations();
 
@@ -178,9 +182,8 @@ void NewGame (int difficulty, const FString &map, bool displayBriefing, const Cl
 ==========================
 */
 
-void ShutdownId (void)
+static void ShutdownId (void)
 {
-	US_Shutdown ();         // This line is completely useless...
 	SD_Shutdown ();
 	IN_Shutdown ();
 
@@ -204,7 +207,7 @@ void ShutdownId (void)
 ==================
 */
 
-const float radtoint = (float)(FINEANGLES/2/PI);
+const double radtoint = (double)(FINEANGLES/2/PI);
 
 void BuildTables (void)
 {
@@ -263,12 +266,10 @@ void CalcProjection (int32_t focal)
 {
 	int     i;
 	int    intang;
-	float   angle;
-	double  tang;
 	int     halfview;
 	double  facedist;
 
-	const fixed projectionFOV = static_cast<fixed>((players[0].FOV / 90.0f)*AspectCorrection[r_ratio].viewGlobal);
+	const fixed projectionFOV = static_cast<fixed>((players[ConsolePlayer].FOV / 90.0f)*AspectCorrection[r_ratio].viewGlobal);
 
 	// 0xFD17 is a magic number to convert the player's radius 0x5800 to FOCALLENGTH (0x5700)
 	focallength = FixedMul(focal, 0xFD17);
@@ -292,14 +293,14 @@ void CalcProjection (int32_t focal)
 	// calculate the angle offset from view angle of each pixel's ray
 	//
 
-	for (i=0;i<halfview;i++)
+	for (i=0;i<=halfview;i++)
 	{
 		// start 1/2 pixel over, so viewangle bisects two middle pixels
-		tang = (int32_t)i*projectionFOV/viewwidth/facedist;
-		angle = (float) atan(tang);
+		double tang = (((double)i+0.5)*projectionFOV)/viewwidth/facedist;
+		double angle = atan(tang);
 		intang = (int) (angle*radtoint);
-		pixelangle[halfview-1-i] = intang;
-		pixelangle[halfview+i] = -intang;
+		pixelangle[halfview-i] = intang;
+		pixelangle[halfview-1+i] = -intang;
 	}
 }
 
@@ -362,22 +363,52 @@ static void CollectGC()
 	GC::DelSoftRootHead();
 }
 
-static bool DrawStartupConsole()
+static bool DrawStartupConsole(FString statusStr)
 {
-	static const char* const tempString = "          " GAMENAME " " DOTVERSIONSTR_NOREV "\n\n\nTo be replaced with console...\n\n  The memory thing was just\n     for show anyways.";
+	// Window for printing text to the screen is (12,76), (308, 182)
+	const int textWindowTop = 76 + 2*ConFont->GetHeight();
+	const int textWindowHeight = 182-textWindowTop;
 
-	if(gameinfo.SignonLump.IsEmpty())
-		return false;
-
-	CA_CacheScreen(TexMan(gameinfo.SignonLump));
+	const bool hasSignon = !gameinfo.SignonLump.IsEmpty();
+	if(hasSignon)
+		CA_CacheScreen(TexMan(gameinfo.SignonLump));
+	else
+		screen->Clear(0, 0, SCREENWIDTH, SCREENHEIGHT, GPalette.BlackIndex, 0);
 
 	word width, height;
-	VW_MeasurePropString(ConFont, tempString, width, height);
-	px = 160-width/2;
-	py = 76+62-height/2;
-	VWB_DrawPropString(ConFont, tempString, CR_GRAY);
 
-	return true;
+	static const char* const engineVersion = GAMENAME " " DOTVERSIONSTR_NOREV;
+	VW_MeasurePropString(ConFont, engineVersion, width, height);
+	px = 160-width/2;
+	py = 76;
+	VWB_DrawPropString(ConFont, engineVersion, CR_GRAY);
+
+	FString engineMode;
+	switch(Net::InitVars.mode)
+	{
+	case Net::MODE_SinglePlayer:
+		engineMode = "Single player";
+		break;
+	case Net::MODE_Host:
+		engineMode.Format("Hosting %d players", Net::InitVars.numPlayers);
+		break;
+	case Net::MODE_Client:
+		engineMode = "Joining multiplayer";
+		break;
+	}
+	VW_MeasurePropString(ConFont, engineMode, width, height);
+	px = 160-width/2;
+	py += ConFont->GetHeight();
+	VWB_DrawPropString(ConFont, engineMode, CR_GRAY);
+
+	VW_MeasurePropString(ConFont, statusStr, width, height);
+	px = 160-width/2;
+	py = textWindowTop + (textWindowHeight-height)/2;
+	VWB_DrawPropString(ConFont, statusStr, CR_GRAY);
+
+	VH_UpdateScreen();
+
+	return hasSignon;
 }
 
 void I_ShutdownGraphics();
@@ -385,15 +416,23 @@ static void InitGame()
 {
 	// initialize SDL
 #if SDL_VERSION_ATLEAST(2,0,0)
+	{
+		SDL_version ver;
+		SDL_GetVersion(&ver);
+		printf("SDL_Init: Using SDL %d.%d.%d\n", ver.major, ver.minor, ver.patch);
+	}
+#else
+	printf("SDL_Init: Using SDL 1.2\n");
+#endif
+
+#if SDL_VERSION_ATLEAST(2,0,0)
 	if(SDL_Init(0) < 0)
 #else
 	if(SDL_Init(SDL_INIT_VIDEO) < 0)
 #endif
 	{
-		printf("Unable to init SDL: %s\n", SDL_GetError());
-		exit(1);
+		I_FatalError("Unable to init SDL: %s", SDL_GetError());
 	}
-	atterm(SDL_Quit);
 
 	SDL_ShowCursor(SDL_DISABLE);
 
@@ -428,9 +467,7 @@ static void InitGame()
 
 	// Setup a temporary window so if we have to terminate we don't do extra mode sets
 	VL_SetVGAPlaneMode (true);
-	DrawStartupConsole();
-
-	VW_UpdateScreen();
+	DrawStartupConsole("Initializing game engine");
 
 //
 // S3DNA - SteamWorks integration
@@ -456,8 +493,6 @@ static void InitGame()
 	VH_Startup ();
 	IN_Startup ();
 	SD_Startup ();
-	printf("US_Startup: Starting the User Manager.\n");
-	US_Startup ();
 
 //
 // Load Keys
@@ -477,28 +512,31 @@ static void InitGame()
 	CreateStatusBar();
 
 //
-// initialize the menusalcProjection
-	printf("CreateMenus: Preparing the menu system...\n");
-	CreateMenus();
-
-//
 // Load Noah's Ark quiz
 //
 	Dialog::LoadGlobalModule("NOAHQUIZ");
 
 //
+// Net game?
+//
+	Net::Init(DrawStartupConsole);
+
+//
+// initialize the menusalcProjection
+	printf("CreateMenus: Preparing the menu system...\n");
+	CreateMenus();
+
+//
 // Finish signon screen
 //
 	VL_SetVGAPlaneMode();
-	if(DrawStartupConsole())
+	if(DrawStartupConsole("Initialization complete"))
 	{
-		VH_UpdateScreen();
-
 		if (!param_nowait)
-			IN_UserInput(70*4);
+			IN_UserInput(70*4, ACK_Any);
 	}
 	else // Delay for a moment to allow the user to enter the jukebox if desired
-		IN_UserInput(16);
+		IN_UserInput(16, ACK_Any);
 
 //
 // HOLDING DOWN 'M' KEY?
@@ -604,8 +642,6 @@ static void SetViewSize (unsigned int screenWidth, unsigned int screenHeight)
 	viewheight = height&~1;
 	centerx = viewwidth/2-1;
 	centerxwide = AspectCorrection[r_ratio].isWide ? CorrectWidthFactor(centerx) : centerx;
-	// This should allow shooting within 9 degrees, but it's not perfect.
-	shootdelta = ((viewwidth<<FRACBITS)/AspectCorrection[r_ratio].viewGlobal)/10;
 	if((unsigned) viewheight == screenHeight)
 		viewscreenx = viewscreeny = screenofs = 0;
 	else
@@ -629,8 +665,8 @@ static void SetViewSize (unsigned int screenWidth, unsigned int screenHeight)
 	//
 	// calculate trace angles and projection constants
 	//
-	if(players[0].mo)
-		CalcProjection(players[0].mo->radius);
+	if(players[ConsolePlayer].mo)
+		CalcProjection(players[ConsolePlayer].mo->radius);
 	else
 		CalcProjection (FOCALLENGTH);
 }
@@ -656,67 +692,20 @@ void NewViewSize (int width, unsigned int scrWidth, unsigned int scrHeight)
 ==========================
 */
 
-void Quit (const char *errorStr, ...)
+void Quit ()
 {
-#ifdef NOTYET
-	byte *screen;
-#endif
-	char error[256];
-	if(errorStr != NULL)
-	{
-		va_list vlist;
-		va_start(vlist, errorStr);
-		vsprintf(error, errorStr, vlist);
-		va_end(vlist);
-	}
-	else error[0] = 0;
+	throw CNoRunExit();
+}
 
-	ShutdownId ();
+void I_FatalError (const char *format, ...)
+{
+	va_list vlist;
+	va_start(vlist, format);
+	FString error;
+	error.VFormat(format, vlist);
+	va_end(vlist);
 
-	if (error[0] == 0)
-	{
-#ifdef NOTYET
-		#ifndef JAPAN
-		CA_CacheGrChunk (ORDERSCREEN);
-		screen = grsegs[ORDERSCREEN];
-		#endif
-#endif
-
-		WriteConfig ();
-	}
-#ifdef NOTYET
-	else
-	{
-		CA_CacheGrChunk (ERRORSCREEN);
-		screen = grsegs[ERRORSCREEN];
-	}
-#endif
-
-	if (error[0] != 0)
-	{
-#ifdef NOTYET
-		memcpy((byte *)0xb8000,screen+7,7*160);
-		SetTextCursor(9,3);
-#endif
-		puts(error);
-#ifdef NOTYET
-		SetTextCursor(0,7);
-#endif
-		VW_WaitVBL(200);
-		exit(1);
-	}
-	else
-	if (error[0] == 0)
-	{
-#ifdef NOTYET
-		#ifndef JAPAN
-		memcpy((byte *)0xb8000,screen+7,24*160); // 24 for SPEAR/UPLOAD compatibility
-		#endif
-		SetTextCursor(0,23);
-#endif
-	}
-
-	exit(0);
+	throw CFatalError(error);
 }
 
 void I_Error(const char* format, ...)
@@ -728,6 +717,21 @@ void I_Error(const char* format, ...)
 	va_end(vlist);
 
 	throw CRecoverableError(error);
+}
+
+//==========================================================================
+
+static bool DebugNetwork = false;
+
+void NetDPrintf(const char* format, ...)
+{
+	if(!DebugNetwork)
+		return;
+
+	va_list vlist;
+	va_start(vlist, format);
+	vprintf(format, vlist);
+	va_end(vlist);
 }
 
 //==========================================================================
@@ -751,11 +755,14 @@ static void PG13 (void)
 
 	VWB_Clear(color, 0, 0, screenWidth, screenHeight);
 	FTexture *tex = TexMan(gameinfo.AdvisoryPic);
-	VWB_DrawGraphic(tex, 304-tex->GetScaledWidth(), 174-tex->GetScaledHeight());
+	if(tex->GetScaledWidth() == 320)
+		VWB_DrawGraphic(tex, 0, 100-tex->GetScaledHeight()/2);
+	else
+		VWB_DrawGraphic(tex, 304-tex->GetScaledWidth(), 174-tex->GetScaledHeight());
 	VW_UpdateScreen ();
 
 	VW_FadeIn ();
-	IN_UserInput (TICRATE * 7);
+	IN_UserInput (TICRATE * 7, ACK_Any);
 
 	VW_FadeOut ();
 }
@@ -790,7 +797,7 @@ static void NonShareware (void)
 
 	VW_UpdateScreen ();
 	VW_FadeIn ();
-	IN_Ack ();
+	IN_Ack (ACK_Any);
 }
 
 //===========================================================================
@@ -888,8 +895,15 @@ int CheckRatio (int width, int height, int *trueratio)
 			fakeratio = (height * 5/4 == width) ? 4 : 0;
 		}
 	}*/
-	// If the size is approximately 16:9, consider it so.
-	if (abs (height * 16/9 - width) < 10)
+	if (abs (height * 32/9 - width) < 5)
+	{
+		ratio = ASPECT_32_9;
+	}
+	else if (abs (height * 64/27 - width) < 5 || abs (height * 43/18 - width) < 5)
+	{
+		ratio = ASPECT_64_27;
+	}
+	else if (abs (height * 16/9 - width) < 10) // If the size is approximately 16:9, consider it so.
 	{
 		ratio = ASPECT_16_9;
 	}
@@ -951,6 +965,15 @@ static const char* CheckParameters(int argc, char *argv[], TArray<FString> &file
 			param_difficulty = 2;
 		else IFARG("--hard")
 			param_difficulty = 3;
+		else IFARG("--skill")
+		{
+			if(++i >= argc)
+			{
+				printf("The skill option is missing an argument!\n");
+				hasError = true;
+			}
+			param_difficulty = atoi(argv[i])-1; // 1-based indexing
+		}
 		else IFARG("--nowait")
 			param_nowait = true;
 		else IFARG("--tedlevel")
@@ -994,6 +1017,8 @@ static const char* CheckParameters(int argc, char *argv[], TArray<FString> &file
 				vid_aspect = ASPECT_16_9;
 			else if(strcmp(ratio, "5:4") == 0)
 				vid_aspect = ASPECT_5_4;
+			else if(strcmp(ratio, "21:9") == 0)
+				vid_aspect = ASPECT_64_27;
 			else
 			{
 				printf("Unknown aspect ratio %s!\n", ratio);
@@ -1027,8 +1052,6 @@ static const char* CheckParameters(int argc, char *argv[], TArray<FString> &file
 		}
 		else IFARG("--noadaptive")
 			noadaptive = true;
-		else IFARG("--nodblbuf")
-			usedoublebuffering = false;
 		else IFARG("--extravbls")
 		{
 			if(++i >= argc)
@@ -1114,6 +1137,39 @@ static const char* CheckParameters(int argc, char *argv[], TArray<FString> &file
 		{
 			SteamWorks::Reset();
 		}
+		else IFARG("--port")
+		{
+			if(++i < argc)
+				Net::InitVars.port = atoi(argv[i]);
+		}
+		else IFARG("--host")
+		{
+			if(++i < argc)
+			{
+				Net::InitVars.mode = Net::MODE_Host;
+				Net::InitVars.numPlayers = atoi(argv[i]);
+			}
+		}
+		else IFARG("--join")
+		{
+			if(++i < argc)
+			{
+				Net::InitVars.mode = Net::MODE_Client;
+				Net::InitVars.joinAddress = argv[i];
+			}
+		}
+		else IFARG("--battle")
+		{
+			Net::InitVars.gameMode = Net::GM_Battle;
+		}
+		else IFARG("--debugnet")
+		{
+			DebugNetwork = true;
+		}
+		else IFARG("--foreignsave")
+		{
+			GameSave::param_foreginsave = true;
+		}
 		else
 			files.Push(argv[i]);
 	}
@@ -1121,7 +1177,7 @@ static const char* CheckParameters(int argc, char *argv[], TArray<FString> &file
 	{
 		if(hasError) printf("\n");
 		printf(
-			GAMENAME " v" DOTVERSIONSTR "\n"
+			"%s\n"
 			"http://maniacsvault.net/ecwolf/\n"
 			"Based on Wolf4SDL v1.7\n"
 			"Ported by Chaos-Software (http://www.chaos-software.de.vu)\n"
@@ -1135,7 +1191,9 @@ static const char* CheckParameters(int argc, char *argv[], TArray<FString> &file
 			" --config <file>        Use an explicit location for the config file\n"
 			" --savedir <dir>        Use an explicit location for save games\n"
 			" --file <file>          Loads an extra data file\n"
+			" --data <extension>     Selects the given game data set skipping the dialog\n"
 			" --tedlevel <level>     Starts the game in the given level\n"
+			" --skill <#>            Sets the difficulty for tedlevel\n"
 			" --baby                 Sets the difficulty to baby for tedlevel\n"
 			" --easy                 Sets the difficulty to easy for tedlevel\n"
 			" --normal               Sets the difficulty to normal for tedlevel\n"
@@ -1148,7 +1206,6 @@ static const char* CheckParameters(int argc, char *argv[], TArray<FString> &file
 			" --bits <b>             Sets the screen color depth\n"
 			"                        (use this when you have palette/fading problems\n"
 			"                        allowed: 8, 16, 24, 32, default: \"best\" depth)\n"
-			" --nodblbuf             Don't use SDL's double buffering\n"
 			" --extravbls <vbls>     Sets a delay after each frame, which may help to\n"
 			"                        reduce flickering (unit is currently 8 ms, default: 0)\n"
 			" --joystick <index>     Use the index-th joystick if available\n"
@@ -1157,9 +1214,15 @@ static const char* CheckParameters(int argc, char *argv[], TArray<FString> &file
 			" --samplerate <rate>    Sets the sound sample rate (given in Hz, default: %i)\n"
 			" --audiobuffer <size>   Sets the size of the audio buffer (-> sound latency)\n"
 			"                        (given in bytes, default: 2048 / (44100 / samplerate))\n"
-			, defaultSampleRate
+			" --host <number>        Sets up a network game with the given number of players.\n"
+			" --join <address>       Joins a network game coordinated by the given host.\n"
+			" --port <number>        Port number to use for network communications.\n"
+			" --battle               Player vs. player battle\n"
+			" --debugnet             Enable network debugging messages.\n"
+			" --foreignsave          Disable save game validity checking.\n"
+			, GetGameCaption(), defaultSampleRate
 		);
-		exit(1);
+		Quit();
 	}
 
 	r_ratio = static_cast<Aspect>(CheckRatio(screenWidth, screenHeight));
@@ -1211,8 +1274,7 @@ unsigned int I_MakeRNGSeed();
 ==========================
 */
 
-void InitThinkerList();
-void ScannerMessageHandler(Scanner::MessageLevel level, const char *error, va_list list)
+static void ScannerMessageHandler(Scanner::MessageLevel level, const char *error, va_list list)
 {
 	FString errorMessage;
 	errorMessage.VFormat(error, list);
@@ -1220,7 +1282,7 @@ void ScannerMessageHandler(Scanner::MessageLevel level, const char *error, va_li
 	if(level == Scanner::ERROR)
 		throw CRecoverableError(errorMessage);
 	else
-		printf("%s", errorMessage.GetChars());
+		Printf("%s", errorMessage.GetChars());
 }
 
 // Basically from ZDoom
@@ -1241,10 +1303,16 @@ void atterm(void (*func)(void))
 	else
 		fprintf(stderr, "Failed to register atterm function!\n");
 }
-void CallTerminateFunctions()
+
+static void CallTerminateFunctions()
 {
+	ShutdownId();
+	WriteConfig();
+
 	while(NumTerms > 0)
 		TermFuncs[--NumTerms]();
+
+	SDL_Quit();
 }
 
 #ifdef _WIN32
@@ -1253,20 +1321,19 @@ void I_AcknowledgeError();
 
 int WL_Main (int argc, char *argv[])
 {
-	// Stop the C library from screwing around with its functions according
-	// to the system locale.
-	setlocale(LC_ALL, "C");
-
-	FileSys::SetupPaths(argc, argv);
-
-	// Find the program directory.
-	FString progdir(FileSys::GetDirectoryPath(FileSys::DIR_Program));
-
-	Scanner::SetMessageHandler(ScannerMessageHandler);
-	atexit(CallTerminateFunctions);
-
 	try
 	{
+		// Stop the C library from screwing around with its functions according
+		// to the system locale.
+		setlocale(LC_ALL, "C");
+
+		FileSys::SetupPaths(argc, argv);
+
+		// Find the program directory.
+		FString progdir(FileSys::GetDirectoryPath(FileSys::DIR_Program));
+
+		Scanner::SetMessageHandler(ScannerMessageHandler);
+
 		printf("ReadConfig: Reading the Configuration.\n");
 		config.LocateConfigFile(argc, argv);
 		ReadConfig();
@@ -1283,72 +1350,43 @@ int WL_Main (int argc, char *argv[])
 
 			printf("W_Init: Init WADfiles.\n");
 			Wads.InitMultipleFiles(files);
-			language.SetupStrings();
 			LumpRemapper::RemapAll();
+			language.SetupStrings();
 		}
-
-		InitThinkerList();
 
 		R_InitRenderer();
 
 		printf("InitGame: Setting up the game...\n");
+		rngseed = I_MakeRNGSeed(); // May change after initializing a net game
 		InitGame();
 
-		rngseed = I_MakeRNGSeed();
 		FRandom::StaticClearRandom();
 
 		printf("DemoLoop: Starting the game loop...\n");
 		DemoLoop();
 
-		Quit("Demo loop exited???");
+		I_FatalError("Demo loop exited???");
 	}
-	catch(class CDoomError &error)
+	catch(CNoRunExit) // Normal exit from deep code
 	{
-		SDL_Quit();
+		CallTerminateFunctions();
+		return 0;
+	}
+	catch(CDoomError &error)
+	{
+		CallTerminateFunctions();
 
 #ifdef __ANDROID__
-		if(error.GetMessage())
-			Printf("%s\n", error.GetMessage());
+		Printf("%s\n", error.GetMessage());
 #else
-		if(error.GetMessage())
-			fprintf(stderr, "%s\n", error.GetMessage());
+		fprintf(stderr, "%s\n", error.GetMessage());
 #endif
 
 #ifdef _WIN32
 		I_AcknowledgeError();
 #endif
 
-		exit(-1);
+		return 1;
 	}
 	return 1;
 }
-
-// TODO: Move this to a system dependent file?
-#if defined(main) && !defined(__APPLE__)
-#undef main
-#endif
-
-#ifndef NO_GTK
-#include <gtk/gtk.h>
-bool GtkAvailable;
-#endif
-
-#ifndef _WIN32
-#ifdef __ANDROID__
-extern "C" int main_android(int argc, char *argv[])
-#else
-int main(int argc, char *argv[])
-#endif
-{
-	// Set LC_NUMERIC environment variable in case some library decides to
-	// clear the setlocale call at least this will be correct.
-	// Note that the LANG environment variable is overridden by LC_*
-	setenv("LC_NUMERIC", "C", 1);
-
-#ifndef NO_GTK
-	GtkAvailable = gtk_init_check(&argc, &argv);
-#endif
-
-	return WL_Main(argc, argv);
-}
-#endif

@@ -1,6 +1,7 @@
 IWad
 {
 	Name = "Super 3D Noah's Ark"
+	Autoname = "Noah"
 	Mapinfo = "mapinfo/noah.txt"
 	MustContain = "ZZZSA0"
 	Game = "Noah"

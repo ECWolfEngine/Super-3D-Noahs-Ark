@@ -4,6 +4,7 @@
 #include "v_palette.h"
 #include "w_wad.h"
 #include "wl_iwad.h"
+#include "wl_net.h"
 #include "zstring.h"
 #include "thingdef/thingdef.h"
 #include "g_shared/a_inventory.h"
@@ -11,11 +12,21 @@
 
 IMPLEMENT_CLASS(Key)
 
+bool AKey::ShouldStay()
+{
+	return Net::InitVars.mode != Net::MODE_SinglePlayer;
+}
+
 class AKeyGiver : public AInventory
 {
 	DECLARE_NATIVE_CLASS(KeyGiver, Inventory)
 
-	public:
+	protected:
+		bool ShouldStay()
+		{
+			return Net::InitVars.mode != Net::MODE_SinglePlayer;
+		}
+
 		bool TryPickup(AActor *toucher)
 		{
 			bool pickedup = true;
@@ -382,9 +393,7 @@ void P_InitKeyMessages()
 	ClearLocks();
 	while ((lump = Wads.FindLump ("LOCKDEFS", &lastlump)) != -1)
 	{
-		FMemLump data = Wads.ReadLump(lump);
-		Scanner sc((const char*)data.GetMem(), data.GetSize());
-		sc.SetScriptIdentifier(Wads.GetLumpFullName(lump));
+		Scanner sc(lump);
 		do
 		{
 			sc.MustGetToken(TK_Identifier);

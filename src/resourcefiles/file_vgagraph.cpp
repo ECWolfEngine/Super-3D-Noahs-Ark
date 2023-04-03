@@ -37,9 +37,12 @@
 #include "wl_def.h"
 #include "m_swap.h"
 #include "resourcefile.h"
+#include "tmemory.h"
 #include "w_wad.h"
 #include "lumpremap.h"
 #include "zstring.h"
+
+#include <algorithm>
 
 struct Huffnode
 {
@@ -70,24 +73,22 @@ struct FVGALump : public FResourceLump
 		{
 			Owner->Reader->Seek(position+(noSkip ? 0 : 4), SEEK_SET);
 
-			byte* data = new byte[length];
-			byte* out = new byte[LumpSize];
-			memset(out, 0, LumpSize);
-			Owner->Reader->Read(data, length);
+			TUniquePtr<byte[]> data(new byte[length]);
+			TUniquePtr<byte[]> out(new byte[LumpSize]);
+			memset(out.Get(), 0, LumpSize);
+			Owner->Reader->Read(data.Get(), length);
 			HuffExpand(data, out);
-			delete[] data;
 
 			Cache = new char[LumpSize];
 			if(!isImage)
-				memcpy(Cache, out, LumpSize);
+				memcpy(Cache, out.Get(), LumpSize);
 			else
 			{
 				// We flip again on big endian so that the code that reads the data makes sense
 				*(WORD*)Cache = LittleShort(dimensions.width);
 				*((WORD*)(Cache+2)) = LittleShort(dimensions.height);
-				memcpy(Cache+4, out, LumpSize-4);
+				memcpy(Cache+4, out.Get(), LumpSize-4);
 			}
-			delete[] out;
 
 			RefCount = 1;
 			return 1;
@@ -100,7 +101,7 @@ struct FVGALump : public FResourceLump
 		
 			if(!LumpSize || !dest)
 			{
-				Quit("length or dest is null!");
+				I_FatalError("length or dest is null!");
 				return NULL;
 			}
 		
@@ -154,55 +155,55 @@ class FVGAGraph : public FResourceFile
 		FVGAGraph(const char* filename, FileReader *file) : FResourceFile(filename, file), lumps(NULL)
 		{
 			FString path(filename);
-			int lastSlash = path.LastIndexOfAny("/\\");
+			int lastSlash = path.LastIndexOfAny("/\\:");
 			extension = path.Mid(lastSlash+10);
 			path = path.Left(lastSlash+1);
 
-			File directory(path.Len() > 0 ? path : ".");
-			FString vgadictFile = path + directory.getInsensitiveFile(FString("vgadict.") + extension, true);
-			FString vgaheadFile = path + directory.getInsensitiveFile(FString("vgahead.") + extension, true);
-
-			vgadictReader = new FileReader();
-			if(!vgadictReader->Open(vgadictFile))
+			FString vgadictFile = FString("vgadict.") + extension;
+			FString vgaheadFile = FString("vgahead.") + extension;
+			if(Wads.CheckIfWadLoaded(path.Left(lastSlash)) == -1)
 			{
-				delete vgadictReader;
-				vgadictReader = NULL;
+				File directory(path.Len() > 0 ? path : ".");
+				FString vgadictFile = path + directory.getInsensitiveFile(FString("vgadict.") + extension, true);
+				FString vgaheadFile = path + directory.getInsensitiveFile(FString("vgahead.") + extension, true);
 
+				vgadictReader = new FileReader();
+				if(!vgadictReader->Open(vgadictFile))
+					vgadictReader.Reset();
+
+				vgaheadReader = new FileReader();
+				if(!vgaheadReader->Open(vgaheadFile))
+					vgaheadReader.Reset();
+			}
+			else // Embedded vanilla data?
+			{
+				FLumpReader *lreader = reinterpret_cast<FLumpReader *>(file);
+
+				for(DWORD i = 0; i < lreader->LumpOwner()->LumpCount(); ++i)
+				{
+					FResourceLump *lump = lreader->LumpOwner()->GetLump(i);
+					if(lump->FullName.CompareNoCase(vgaheadFile) == 0)
+						vgaheadReader = lump->NewReader();
+					else if(lump->FullName.CompareNoCase(vgadictFile) == 0)
+						vgadictReader = lump->NewReader();
+
+					if(vgaheadReader && vgadictReader)
+						break;
+				}
+			}
+
+			if(!vgadictReader)
+			{
+				FString error;
+				error.Format("Could not open vgagraph since %s is missing.", vgadictFile.GetChars());
+				throw CRecoverableError(error);
+			}
+			if(!vgaheadReader)
+			{
 				FString error;
 				error.Format("Could not open vgagraph since %s is missing.", vgaheadFile.GetChars());
 				throw CRecoverableError(error);
 			}
-
-			vgaheadReader = new FileReader();
-			if(!vgaheadReader->Open(vgaheadFile))
-			{
-				delete vgadictReader;
-				delete vgaheadReader;
-				vgadictReader = vgaheadReader = NULL;
-
-				FString error;
-				error.Format("Could not open vgagraph since %s is missing.", vgaheadFile.GetChars());
-				throw CRecoverableError(error);
-			}
-		}
-
-		FVGAGraph(const char* filename, FileReader **file) : FResourceFile(filename, file[0]), lumps(NULL)
-		{
-			FString path(filename);
-			int lastSlash = path.LastIndexOf(':');
-			extension = path.Mid(lastSlash+10);
-
-			vgaheadReader = file[1];
-			vgadictReader = file[2];
-		}
-
-		~FVGAGraph()
-		{
-			if(lumps != NULL)
-				delete[] lumps;
-
-			delete vgadictReader;
-			delete vgaheadReader;
 		}
 
 		bool Open(bool quiet)
@@ -216,25 +217,26 @@ class FVGAGraph : public FResourceFile
 
 			NumLumps = vgaheadReader->GetLength()/3;
 			vgaheadReader->Seek(0, SEEK_SET);
-			lumps = new FVGALump[NumLumps];
+			lumps.Reset(new FVGALump[NumLumps]);
 			// The vgahead has 24-bit ints.
-			BYTE* data = new BYTE[NumLumps*3];
-			vgaheadReader->Read(data, NumLumps*3);
+			TUniquePtr<BYTE[]> vgahead(new BYTE[NumLumps*3]);
+			vgaheadReader->Read(vgahead.Get(), NumLumps*3);
 
 			unsigned int numPictures = 0;
-			Dimensions* dimensions = NULL;
+			unsigned int numFonts = 0;
+			TArray<Dimensions> dimensions;
 			for(unsigned int i = 0;i < NumLumps;i++)
 			{
 				// Give the lump a temporary name.
 				char lumpname[9];
-				sprintf(lumpname, "VGA%05d", i);
+				mysnprintf(lumpname, 9, "VGA%05d", i);
 				lumps[i].Owner = this;
 				lumps[i].LumpNameSetup(lumpname);
 
 				lumps[i].noSkip = false;
-				lumps[i].isImage = (i >= 3 && i-3 < numPictures);
+				lumps[i].isImage = (i > numFonts+2 && i-numFonts-1 < numPictures);
 				lumps[i].Namespace = lumps[i].isImage ? ns_graphics : ns_global;
-				lumps[i].position = ReadLittle24(&data[i*3]);
+				lumps[i].position = ReadLittle24(&vgahead[i*3]);
 				lumps[i].huffman = huffman;
 
 				// The actual length isn't stored so we need to go by the position of the following lump.
@@ -250,7 +252,7 @@ class FVGAGraph : public FResourceFile
 				else
 					lumps[i].LumpSize = LittleLong(lumps[i].LumpSize);
 
-				if(i == 1) // We must do this on the second lump to how the position is filled.
+				if(i == 1) // We must do this starting with the second lump due to how the position is filled.
 				{
 					// It looks like editors often neglect to give proper sizes
 					// for the pictable. If we can at least assume that the
@@ -259,18 +261,18 @@ class FVGAGraph : public FResourceFile
 					// where the decoder ends. (Wolf3D hard coded the number of
 					// pictures so it just used that for the size.)
 					Reader->Seek(lumps[0].position+4, SEEK_SET);
-					lumps[0].LumpSize = (NumLumps-3)*4;
+					lumps[0].LumpSize = (NumLumps-1)*4;
 
-					byte* data = new byte[lumps[0].length];
-					byte* out = new byte[(NumLumps-3)*4];
-					Reader->Read(data, lumps[0].length);
+					TUniquePtr<byte[]> data(new byte[lumps[0].length]);
+					Reader->Read(data.Get(), lumps[0].length);
+
+					TUniquePtr<byte[]> out(new byte[lumps[0].LumpSize]);
 					byte* endPtr = lumps[0].HuffExpand(data, out);
-					delete[] data;
 
-					lumps[0].LumpSize = (unsigned int)(endPtr - out);
+					lumps[0].LumpSize = (unsigned int)(endPtr - out.Get());
 					numPictures = lumps[0].LumpSize/4;
 
-					dimensions = new Dimensions[numPictures];
+					dimensions.Resize(numPictures);
 					for(unsigned int j = 0;j < numPictures;j++)
 					{
 						dimensions[j].width = ReadLittleShort(&out[j*4]);
@@ -281,36 +283,92 @@ class FVGAGraph : public FResourceFile
 							dimensions[j].width == 0 || dimensions[j].height == 0)
 							numPictures = j;
 					}
-					delete[] out;
 				}
-				else if(lumps[i].isImage)
+				// Check if the last lump is a font, but only until we hit a
+				// lump we determined was not a font.
+				else if(i == numFonts+2)
 				{
-					lumps[i].dimensions = dimensions[i-3];
+					// First check if it's large enough for the font header
+					if(lumps[i-1].LumpSize > 770)
+					{
+						Reader->Seek(lumps[i-1].position+4, SEEK_SET);
+
+						TUniquePtr<byte[]> data(new byte[lumps[i-1].length]);
+						Reader->Read(data.Get(), lumps[i-1].length);
+
+						TUniquePtr<byte[]> out(new byte[lumps[i-1].LumpSize]);
+						byte* endPtr = lumps[i-1].HuffExpand(data, out);
+
+						bool endhit = false;
+						WORD height = ReadLittleShort(out);
+						for(unsigned int c = 0;c < 256;++c)
+						{
+							WORD offset = ReadLittleShort(&out[c*2+2]);
+							BYTE width = out[c+514];
+
+							int space = lumps[i-1].LumpSize - (offset + width*height);
+							if(space < 0)
+							{
+								lumps[i-1].isImage = lumps[i].isImage = true;
+								break;
+							}
+							else if(space == 0)
+								endhit = true;
+						}
+
+						if(!endhit)
+							lumps[i-1].isImage = lumps[i].isImage = true;
+
+						if(!lumps[i].isImage)
+							++numFonts;
+					}
+					else
+						lumps[i-1].isImage = lumps[i].isImage = true;
+
+					if(lumps[i-1].isImage)
+					{
+						lumps[i-1].dimensions = dimensions[0];
+						lumps[i-1].LumpSize += 4;
+					}
+				}
+
+				if(lumps[i].isImage)
+				{
+					lumps[i].dimensions = dimensions[i-numFonts-1];
 					lumps[i].LumpSize += 4;
 				}
 			}
+
+			// HACK: Wolfstone has a chunk of garbage data after the pictures
+			//       and before the TILE8.  It's a partially zero-filled version
+			//       of the Get Psyched graphic so no idea why it exists or how
+			//       it got there.  Unless I see a reason to change this I
+			//       believe the best method to attack that problem is to detect
+			//       that the size is the same and delete the lump.
+			unsigned int tile8Position = 1+numFonts+numPictures;
+			if(tile8Position < NumLumps && lumps[tile8Position].LumpSize == lumps[tile8Position-1].LumpSize-4)
+			{
+				std::copy(&lumps[tile8Position+1], &lumps[NumLumps], &lumps[tile8Position]);
+				--NumLumps;
+			}
+
 			// HACK: For some reason id decided the tile8 lump will not tell
 			//       its size.  So we need to assume it's right after the
 			//       graphics. To make matters worse, we can't assume a size
 			//       for it since S3DNA has more than 72 tiles.
 			//       We will use the method from before to guess a size.
-			unsigned int tile8Position = 3+numPictures;
 			if(tile8Position < NumLumps && (unsigned)lumps[tile8Position].LumpSize > lumps[tile8Position].length)
 			{
-				byte* data = new byte[lumps[tile8Position].length];
-				byte* out = new byte[64*256];
+				TUniquePtr<byte[]> data(new byte[lumps[tile8Position].length]);
 				Reader->Seek(lumps[tile8Position].position, SEEK_SET);
-				Reader->Read(data, lumps[tile8Position].length);
-				byte* endPtr = lumps[tile8Position].HuffExpand(data, out);
-				delete[] data;
-				delete[] out;
+				Reader->Read(data.Get(), lumps[tile8Position].length);
+
+				byte out[64*256];
+				byte* endPtr = lumps[tile8Position].HuffExpand(data.Get(), out);
 
 				lumps[tile8Position].noSkip = true;
 				lumps[tile8Position].LumpSize = (unsigned int)(endPtr - out)&~0x3F;
 			}
-			if(dimensions != NULL)
-				delete[] dimensions;
-			delete[] data;
 
 			// We don't care about the PICTABLE lump now so we can just skip
 			// over it.
@@ -327,22 +385,18 @@ class FVGAGraph : public FResourceFile
 		}
 
 	private:
-		Huffnode	huffman[255];
-		FVGALump*	lumps;
+		Huffnode huffman[255];
+		TUniquePtr<FVGALump[]> lumps;
 
-		FString		extension;
-		FileReader	*vgaheadReader;
-		FileReader	*vgadictReader;
+		FString extension;
+		TUniquePtr<FileReader> vgaheadReader;
+		TUniquePtr<FileReader> vgadictReader;
 };
 
 FResourceFile *CheckVGAGraph(const char *filename, FileReader *file, bool quiet)
 {
 	FString fname(filename);
-	int embeddedSep = fname.LastIndexOf(':');
-#ifdef _WIN32
-	if(embeddedSep == 1) embeddedSep = -1;
-#endif
-	int lastSlash = MAX<long>(fname.LastIndexOfAny("/\\"), embeddedSep);
+	int lastSlash = fname.LastIndexOfAny("/\\:");
 	if(lastSlash != -1)
 		fname = fname.Mid(lastSlash+1, 8);
 	else
@@ -350,8 +404,7 @@ FResourceFile *CheckVGAGraph(const char *filename, FileReader *file, bool quiet)
 
 	if(fname.Len() == 8 && fname.CompareNoCase("vgagraph") == 0) // file must be vgagraph.something
 	{
-		FResourceFile *rf = embeddedSep == -1 ? new FVGAGraph(filename, file) :
-			new FVGAGraph(filename, reinterpret_cast<FileReader**>(file)); // HACK
+		FResourceFile *rf = new FVGAGraph(filename, file);
 		if(rf->Open(quiet)) return rf;
 		rf->Reader = NULL; // to avoid destruction of reader
 		delete rf;

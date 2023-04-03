@@ -60,18 +60,6 @@ byte skyc[65536L];
 long cloudx = 0, cloudy = 0;
 cloudsky_t *curSky = NULL;
 
-#ifdef USE_FEATUREFLAGS
-
-// The lower left tile of every map determines the used cloud sky definition from cloudSkys.
-static int GetCloudSkyDefID()
-{
-	int skyID = ffDataBottomLeft;
-	assert(skyID >= 0 && skyID < lengthof(cloudSkys));
-	return skyID;
-}
-
-#else
-
 static int GetCloudSkyDefID()
 {
 	int skyID;
@@ -92,8 +80,6 @@ static int GetCloudSkyDefID()
 	assert(skyID >= 0 && skyID < lengthof(cloudSkys));
 	return skyID;
 }
-
-#endif
 
 void SplitS(unsigned size,unsigned x1,unsigned y1,unsigned x2,unsigned y2)
 {
@@ -138,7 +124,7 @@ void InitSky()
 {
 	unsigned cloudskyid = GetCloudSkyDefID();
 	if(cloudskyid >= lengthof(cloudSkys))
-		Quit("Illegal cloud sky id: %u", cloudskyid);
+		I_FatalError("Illegal cloud sky id: %u", cloudskyid);
 	curSky = &cloudSkys[cloudskyid];
 
 	memset(skyc, 0, sizeof(skyc));
@@ -178,7 +164,7 @@ void InitSky()
 	//     skyc[i] = skyc[i + 256] = skyc[i + 512] = i;
 
 	if(curSky->colorMapIndex >= lengthof(colorMaps))
-		Quit("Illegal colorMapIndex for cloud sky def %u: %u", cloudskyid, curSky->colorMapIndex);
+		I_FatalError("Illegal colorMapIndex for cloud sky def %u: %u", cloudskyid, curSky->colorMapIndex);
 
 	colormap_t *curMap = &colorMaps[curSky->colorMapIndex];
 	int numColors = curMap->numColors;

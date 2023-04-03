@@ -4,7 +4,7 @@ doors/close				{ DSDRCLS ALDRCLS PCDRCLS }
 doors/metal_open		{ DSMDROPN ALDROPN PCDROPN }
 doors/metal_close		{ DSMDRCLS ALDRCLS PCDRCLS }
 
-world/hitwall			{ NULL ALHITWAL PCHITWAL }
+world/hitwall			{ DSHITWAL ALHITWAL PCHITWAL }
 world/pushwall			{ DSPSHWAL ALPSHWAL PCPSHWAL }
 world/pushwall_heavy	{ DSLPHWAL ALPSHWAL PCPSHWAL }
 
@@ -13,29 +13,36 @@ $alias switches/exitbutn switches/normbutn
 switches/elevbutn		{ DSPLATFM ALSWITCH PCSWITCH }
 
 misc/1up				{ DSBNS1UP ALBNS1UP PCBNS1UP }
-misc/do_nothing			{ NULL ALNOTHIN PCNOTHIN }
-misc/ammo_pickup		{ NULL ALAMMOUP PCAMMOUP }
-misc/ammobox_pickup		{ NULL ALAMBXUP PCAMBXUP }
-misc/health_pickup		{ NULL ALFOODUP PCFOODUP }
-misc/medkit_pickup		{ NULL ALMEDIUP PCMEDIUP }
+misc/do_nothing			{ DSNOTIN ALNOTHIN PCNOTHIN }
+misc/ammo_pkup			{ DSAMMOUP ALAMMOUP PCAMMOUP }
+misc/ammobox_pkup		{ DSAMBXUP ALAMBXUP PCAMBXUP }
+misc/health_pkup		{ DSFOODUP ALFOODUP PCFOODUP }
+misc/medkit_pkup		{ DSMEDIUP ALMEDIUP PCMEDIUP }
 misc/k_pkup				{ DSGETKEY ALGETKEY PCGETKEY }
-misc/end_bonus1			{ NULL ALENDBN1 PCENDBN1 }
+misc/end_bonus1			{ DSENDBN1 ALENDBN1 PCENDBN1 }
 misc/end_bonus2			{ DSENDBN2 ALENDBN2 PCENDBN2 }
-misc/no_bonus			{ NULL ALNOBNS PCNOBNS }
-misc/100percent			{ NULL ALPRC100 PCPRC100 }
+misc/no_bonus			{ DSNOBNS ALNOBNS PCNOBNS }
+misc/100percent			{ DSPRC100 ALPRC100 PCPRC100 }
 misc/slurpie			{ DSSLURPE ALSLURPE PCSLURPE }
 misc/slurpie2			{ DSLSLURP ALSLURPE PCSLURPE }
 misc/yeah				{ DSYEAH ALYEAH PCYEAH }
 misc/fart				{ DSFART ALFART PCFART }
 misc/crash				{ DSCRASH ALFART PCFART }
+$alias misc/dogfood_pkup	misc/health_pkup
 
-menu/activate			{ NULL ALSELECT PCSELECT }
-menu/escape				{ NULL ALESCPRS PCESCPRS }
-menu/move1				{ NULL ALMVGUN1 PCMVGUN1 }
-menu/move2				{ NULL ALMVGUN2 PCMVGUN2 }
+// Compatibility
+$alias misc/ammo_pickup		misc/ammo_pkup
+$alias misc/ammobox_pickup	misc/ammobox_pkup
+$alias misc/health_pickup	misc/health_pkup
+$alias misc/medkit_pickup	misc/medkit_pkup
+
+menu/activate			{ DSSELECT ALSELECT PCSELECT }
+menu/escape				{ DSESCPRS ALESCPRS PCESCPRS }
+menu/move1				{ DSMVGUN1 ALMVGUN1 PCMVGUN1 }
+menu/move2				{ DSMVGUN2 ALMVGUN2 PCMVGUN2 }
 
 player/death			{ DSPLDETH ALPLDETH PCPLDETH }
-player/usefail			{ NULL ALNOWAY PCNOWAY }
+player/usefail			{ DSNOWAY ALNOWAY PCNOWAY }
 
 // ------ Super 3D Noah's Ark ------
 
@@ -45,8 +52,11 @@ $ifnoah
 // Kill hitwall sound in Noah's Ark
 world/hitwall NULL
 
-misc/100percent			{ NULL ALENDBN2 PCENDBN2 }
+misc/100percent			{ DSENDBN2 ALENDBN2 PCENDBN2 }
 $alias misc/w_pkup		misc/i_pkup
+$alias misc/ammo_pkup	misc/i_pkup
+$alias misc/health_pkup	misc/i_pkup
+$alias misc/medkit_pkup	misc/i_pkup
 $alias misc/map_pkup	misc/k_pkup
 
 // Defined here since vanilla Wolf3D didn't use it.
@@ -111,5 +121,174 @@ burt/active				{ DSBRTSTP ALBRTSTP PCBRTSTP }
 burt/attack				{ DSSPIT ALSPIT PCSPIT }
 burt/death				{ DSSLEEP ALSLEEP PCSLEEP }
 
-quiz/correct			{ NULL ALENDBN2 PCENDBN2 }
-quiz/incorrect			{ NULL ALNOBNS PCNOBNS }
+quiz/correct			{ DSENDBN2 ALENDBN2 PCENDBN2 }
+quiz/incorrect			{ DSNOBNS ALNOBNS PCNOBNS }
+
+// ------ Blake Stone ------
+
+$ifblake
+misc/health_pkup			{ DSHEAL1 ALHEAL1 PCHEAL1 }
+$endif
+
+doors/heavy_open		{ DSDR2OPN ALDR2OPN PCDR2OPN }
+doors/heavy_close		{ DSDR2CLS ALDR2CLS PCDR2CLS }
+
+weapon/autochargepistol/attack		{ DSFIRAUT ALFIRAUT PCFIRAUT }
+weapon/slowfireprotector/attack		{ DSBLASTR ALBLASTR PCBLASTR }
+weapon/slowfireprotector/pickup		{ DSGETPIS ALGETPIS PCGETPIS }
+weapon/rapidassaultweapon/attack	{ DSBRIFLE ALBRIFLE PCBRIFLE }
+weapon/rapidassaultweapon/pickup	{ DSGETRIF ALGETRIF PCGETRIF }
+weapon/dualneutrondisruptor/attack	{ DSIONCAN ALIONCAN PCIONCAN }
+weapon/dualneutrondisruptor/pickup	{ DSGETION ALGETION PCGETION }
+weapon/plasmadischargeunit/pickup	{ DSGETCAN ALGETCAN PCGETCAN }
+weapon/antiplasmacannon/pickup		{ DSGETCAN ALGETCAN PCGETCAN }
+
+treasure/moneybag/pickup	{ DSBONUS1 ALBONUS1 PCBONUS1 }
+treasure/loot/pickup		{ DSBONUS2 ALBONUS2 PCBONUS2 }
+treasure/goldbars/pickup	{ DSBONUS3 ALBONUS3 PCBONUS3 }
+treasure/xylanorb/pickup	{ DSBONUS4 ALBONUS4 PCBONUS4 }
+
+misc/coin_pickup		{ DSCONCES ALCONCES PCCONCES }
+misc/radar_pickup		{ DSGETRDR ALGETRDR PCGETRDR }
+
+misc/blake/explosion1	{ DSEXPLO1 ALEXPLO1 PCEXPLO1 }
+misc/blake/explosion2	{ DSEXPLO2 ALEXPLO2 PCEXPLO2 }
+
+misc/plasmadetonator/pickup	{ DSGETDET ALGETDET PCGETDET }
+$random misc/plasmadetonator/explosion { misc/blake/explosion1 misc/blake/explosion2 }
+
+plasmagrenade/fire		{ DSGRENAD ALGRENAD PCGRENAD }
+$random plasmagrenade/hit { misc/blake/explosion1 misc/blake/explosion2 }
+
+antiplasmashot/fire		{ DSIONCAN ALIONCAN PCIONCAN }
+$random antiplasmashot/hit { misc/blake/explosion1 misc/blake/explosion2 }
+
+rentacop/sight			{ DSRNTSIT ALRNTSIT PCRNTSIT }
+sectorguard/sight		{ DSSECSIT ALRNTSIT PCRNTSIT }
+rentacop/death1			{ DSRNTDT1 ALRNTDT1 PCRNTDT1 }
+sectorguard/death1		{ DSSECDT1 ALRNTDT1 PCRNTDT1 }
+rentacop/death2			{ DSRNTDT2 ALRNTDT2 PCRNTDT2 }
+sectorguard/death2		{ DSSECDT2 ALRNTDT2 PCRNTDT2 }
+rentacop/attack			{ DSBLASTR ALBLASTR PCBLASTR }
+sectorguard/attack		{ DSBLASTR ALBLASTR PCBLASTR }
+$random rentacop/death { rentacop/death1 rentacop/death2 }
+$random sectorguard/death { sectorguard/death1 sectorguard/death2 }
+
+proguard/sight			{ DSPROSIT ALPROSIT PCPROSIT }
+techwarrior/sight		{ DSTCWSIT ALPROSIT PCPROSIT }
+proguard/death1			{ DSPRODT1 ALPRODT1 PCPRODT1 }
+techwarrior/death1		{ DSTCWDT1 ALPRODT1 PCPRODT1 }
+proguard/death2			{ DSPRODT2 ALPRODT2 PCPRODT2 }
+techwarrior/death2		{ DSTCWDT2 ALPRODT2 PCPRODT2 }
+proguard/attack			{ DSBRIFLE ALBRIFLE PCBRIFLE }
+techwarrior/attack		{ DSBRIFLE ALBRIFLE PCBRIFLE }
+$random proguard/death { proguard/death1 proguard/death2 }
+$random techwarrior/death { techwarrior/death1 techwarrior/death2 }
+
+startrooper/sight		{ DSSWTSIT ALSWTSIT PCSWTSIT }
+alienprotector/sight	{ DSAPTSIT ALSWTSIT PCSWTSIT }
+startrooper/death1		{ DSSWTDT1 ALSWTDT1 PCSWTDT1 }
+alienprotector/death1	{ DSAPTDT1 ALSWTDT1 PCSWTDT1 }
+startrooper/wound		{ DSSWTDT2 ALSWTDT2 PCSWTDT2 }
+alienprotector/wound	{ DSAPTDT2 ALSWTDT2 PCSWTDT2 }
+startrooper/attack		{ DSBRIFLE ALBRIFLE PCBRIFLE }
+alienprotector/attack	{ DSBRIFLE ALBRIFLE PCBRIFLE }
+$random startrooper/death { startrooper/death1 startrooper/wound }
+$random alienprotector/death { alienprotector/death1 alienprotector/wound }
+
+scientist/sight			{ DSSCISIT ALSCISIT PCSCISIT }
+scientist/attack		{ DSBLASTR ALBLASTR PCBLASTR }
+scientist/death1		{ DSSCIDT1 ALSCIDT1 PCSCIDT1 }
+scientist/death2		{ DSSCIDT2 ALSCIDT2 PCSCIDT2 }
+scientist/death3		{ DSSCIDT3 ALSCIDT3 PCSCIDT3 }
+scientist/inform_death1	{ DSINFDT1 ALINFDT1 PCINFDT1 }
+scientist/inform_death2 { DSINFDT2 ALINFDT2 PCINFDT2 }
+scientist/inform_death3 { DSINFDT3 ALINFDT3 PCINFDT3 }
+$random scientist/death { scientist/death1 scientist/death2 scientist/death3 }
+$random scientist/inform_death { scientist/inform_death1 scientist/inform_death2 scientist/inform_death3 }
+
+floatingbomb/sight		{ DSSCTSIT ALSCTSIT PCSCTSIT }
+$random floatingbomb/death { misc/blake/explosion1 misc/blake/explosion2 }
+$random volatiletransport/death { misc/blake/explosion1 misc/blake/explosion2 }
+
+geneticguard/sight		{ DSGENSIT ALGENSIT PCGENSIT }
+geneticguard/death		{ DSPODDTH ALPODDTH PCPODDTH }
+geneticguard/attack		{ DSBLASTR ALBLASTR PCBLASTR }
+geneticguard/melee		{ DSFISTAT ALFISTAT PCFISTAT }
+
+cyborgwarrior/sight		{ DSBLUSIT ALBLUSIT PCBLUSIT }
+cyborgwarrior/death		{ DSPODDTH ALPODDTH PCPODDTH }
+cyborgwarrior/attack	{ DSBLASTR ALBLASTR PCBLASTR }
+
+spidermutant/sight		{ DSSCNSIT ALSCNSIT PCSCNSIT }
+spidermutant/death		{ DSBLUDTH ALBLUDTH PCBLUDTH }
+spidermutant/attack		{ DSSPITAT ALSPITAT PCSPITAT }
+
+aciddragon/sight		{ DSPODSIT ALPODSIT PCPODSIT }
+aciddragon/death		{ DSPODDTH ALPODDTH PCPODDTH }
+aciddragon/attack		{ DSSPITAT ALSPITAT PCSPITAT }
+
+breatherbeast/sight		{ DSGENSIT ALGENSIT PCGENSIT }
+breatherbeast/death		{ DSPODDTH ALPODDTH PCPODDTH }
+breatherbeast/attack	{ DSBLASTR ALBLASTR PCBLASTR }
+
+biomechguardian/sight	{ DSBLUSIT ALBLUSIT PCBLUSIT }
+biomechguardian/death	{ DSMTHDTH ALMTHDTH PCMTHDTH }
+biomechguardian/attack	{ DSBLASTR ALBLASTR PCBLASTR }
+
+reptilianwarrior/sight	{ DSGENSIT ALGENSIT PCGENSIT }
+reptilianwarrior/death	{ DSSCNDTH ALSCNDTH PCSCNDTH }
+reptilianwarrior/attack	{ DSBLASTR ALBLASTR PCBLASTR }
+
+mechsentinel/sight		{ DSBLUSIT ALBLUSIT PCBLUSIT }
+mechsentinel/attack		{ DSBLASTR ALBLASTR PCBLASTR }
+$random mechsentinel/death { misc/blake/explosion1 misc/blake/explosion2 }
+
+mutanthuman/sight		{ DSMTHSIT ALMTHSIT PCMTHSIT }
+mutanthuman/death		{ DSMTHDTH ALMTHDTH PCMTHDTH }
+mutanthuman/melee		{ DSFISTAT ALFISTAT PCFISTAT }
+
+electrosphere/attack	{ DSELCATK ALELCATK PCELCATK }
+
+smallcanisteralien/release	{ DSSCNBRK ALSCNBRK PCSCNBRK }
+smallcanisteralien/sight	{ DSSCNSIT ALSCNSIT PCSCNSIT }
+smallcanisteralien/attack	{ DSSPITAT ALSPITAT PCSPITAT }
+smallcanisteralien/melee	{ DSCLAWAT ALCLAWAT PCCLAWAT }
+smallcanisteralien/death	{ DSSCNDTH ALSCNDTH PCSCNDTH }
+
+largecanisteralien/release	{ DSLCNBRK ALLCNBRK PCLCNBRK }
+largecanisteralien/sight	{ DSLCNSIT ALLCNSIT PCLCNSIT }
+largecanisteralien/attack	{ DSSPITAT ALSPITAT PCSPITAT }
+largecanisteralien/melee	{ DSCLAWAT ALCLAWAT PCCLAWAT }
+largecanisteralien/death	{ DSLCNDTH ALLCNDTH PCLCNDTH }
+
+gurneymutant/sight		{ DSGRNSIT ALGRNSIT PCGRNSIT }
+gurneymutant/attack		{ DSBLASTR ALBLASTR PCBLASTR }
+gurneymutant/death		{ DSGRNDTH ALGRNDTH PCGRNDTH }
+
+podalien/release		{ DSPODHTC ALPODHTC PCPODHTC }
+podalien/sight			{ DSPODSIT ALPODSIT PCPODSIT }
+podalien/melee			{ DSCLAWAT ALCLAWAT PCCLAWAT }
+podalien/death			{ DSPODDTH ALPODDTH PCPODDTH }
+
+turret/attack			{ DSBLASTR ALBLASTR PCBLASTR }
+$random turret/death { misc/blake/explosion1 misc/blake/explosion2 }
+
+giantstalker/attack		{ DSBLASTR ALBLASTR PCBLASTR }
+giantstalker/sight		{ DSBLUSIT ALBLUSIT PCBLUSIT }
+giantstalker/death		{ DSBLUDTH ALBLUDTH PCBLUDTH }
+
+spectordemon/sight		{ DSGENSIT ALGENSIT PCGENSIT }
+spectordemon/death		{ DSPODDTH ALPODDTH PCPODDTH }
+
+goldfire/monster/attack	{ DSELCATK ALELCATK PCELCATK }
+
+armoredstalker/attack	{ DSBLASTR ALBLASTR PCBLASTR }
+armoredstalker/sight	{ DSBLUSIT ALBLUSIT PCBLUSIT }
+armoredstalker/death	{ DSMTHDTH ALMTHDTH PCMTHDTH }
+
+crawlerbeast/attack		{ DSSPITAT ALSPITAT PCSPITAT }
+crawlerbeast/sight		{ DSGENSIT ALGENSIT PCGENSIT }
+crawlerbeast/death		{ DSLCNDTH ALLCNDTH PCLCNDTH }
+
+liquidalien/death		{ DSLIQDTH ALLIQDTH PCLIQDTH }

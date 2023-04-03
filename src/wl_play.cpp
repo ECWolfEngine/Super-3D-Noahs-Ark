@@ -16,11 +16,13 @@
 #include "thinker.h"
 #include "actor.h"
 #include "textures/textures.h"
+#include "v_video.h"
 #include "wl_agent.h"
 #include "wl_debug.h"
 #include "wl_draw.h"
 #include "wl_game.h"
 #include "wl_inter.h"
+#include "wl_net.h"
 #include "wl_play.h"
 #include "g_mapinfo.h"
 #include "a_inventory.h"
@@ -50,7 +52,6 @@ bool madenoise;              // true when shooting or screaming
 
 exit_t playstate;
 
-static int DebugOk;
 #ifdef __ANDROID__
 extern bool ShadowingEnabled;
 #endif
@@ -59,6 +60,7 @@ bool noclip, ammocheat, mouselook = false;
 int godmode, singlestep;
 bool notargetmode = false;
 unsigned int extravbls = 0; // to remove flicker (gray stuff at the bottom)
+unsigned short Paused;
 
 //
 // replacing refresh manager
@@ -70,51 +72,53 @@ unsigned tics;
 // control info
 //
 #define JoyAx(x) (32+(x<<1))
+#define CS_AxisDigital -1
 ControlScheme controlScheme[] =
 {
-	{ bt_moveforward,		"Forward",		JoyAx(1),	sc_W,			-1, &controly, 1, true },
-	{ bt_movebackward,		"Backward",		JoyAx(1)+1,	sc_S,			-1, &controly, 0, true },
-	{ bt_strafeleft,		"Strafe Left",	JoyAx(0),	sc_A,			-1, &controlstrafe, 1, true },
-	{ bt_straferight,		"Strafe Right",	JoyAx(0)+1,	sc_D,			-1, &controlstrafe, 0, true },
-	{ bt_turnleft,			"Turn Left",	JoyAx(3),	sc_LeftArrow,	-1, &controlx, 1, true },
-	{ bt_turnright,			"Turn Right",	JoyAx(3)+1,	sc_RightArrow,	-1, &controlx, 0, true },
-	{ bt_attack,			"Attack",		JoyAx(5)+1,	sc_UpArrow,		0,  NULL, 0, true },
-	{ bt_strafe,			"Strafe",		1,			sc_Alt,			-1, NULL, 0, true },
-	{ bt_run,				"Run",			7,			sc_LShift,		-1, NULL, 0, true },
-	{ bt_use,				"Use",			8,			sc_Space,		-1, NULL, 0, true },
-	{ bt_slot1,				"Slot 1",		-1,			sc_1,			-1, NULL, 0, true },
-	{ bt_slot2,				"Slot 2", 		-1,			sc_2,			-1, NULL, 0, true },
-	{ bt_slot3,				"Slot 3",		-1,			sc_3,			-1, NULL, 0, true },
-	{ bt_slot4,				"Slot 4",		-1,			sc_4,			-1, NULL, 0, true },
-	{ bt_slot5,				"Slot 5",		-1,			sc_5,			-1, NULL, 0, true },
-	{ bt_slot6,				"Slot 6",		-1,			sc_6,			-1, NULL, 0, true },
-	{ bt_slot7,				"Slot 7",		-1,			sc_7,			-1, NULL, 0, false },
-	{ bt_slot8,				"Slot 8",		-1,			sc_8,			-1, NULL, 0, false },
-	{ bt_slot9,				"Slot 9",		-1,			sc_9,			-1, NULL, 0, false },
-	{ bt_slot0,				"Slot 0",		-1,			sc_0,			-1, NULL, 0, false },
-	{ bt_nextweapon,		"Next Weapon",	14,			-1,				-1, NULL, 0, true },
-	{ bt_prevweapon,		"Prev Weapon",	13, 		-1,				-1, NULL, 0, true },
-	{ bt_altattack,			"Alt Attack",	10,			-1,				-1, NULL, 0, false },
-	{ bt_reload,			"Reload",		0,			-1,				-1, NULL, 0, false },
-	{ bt_zoom,				"Zoom",			JoyAx(4)+1,	-1,				-1, NULL, 0, false },
-	{ bt_automap,			"Automap",		4,			sc_Tab,			-1, NULL, 0, true },
-	{ bt_showstatusbar,		"Show Status",	-1,			-1,				-1,	NULL, 0, true },
+	{ bt_moveforward,		"Forward",		JoyAx(1),	sc_W,			-1, offsetof(TicCmd_t, controly), 1, true },
+	{ bt_movebackward,		"Backward",		JoyAx(1)+1,	sc_S,			-1, offsetof(TicCmd_t, controly), 0, true },
+	{ bt_strafeleft,		"Strafe Left",	JoyAx(0),	sc_A,			-1, offsetof(TicCmd_t, controlstrafe), 1, true },
+	{ bt_straferight,		"Strafe Right",	JoyAx(0)+1,	sc_D,			-1, offsetof(TicCmd_t, controlstrafe), 0, true },
+	{ bt_turnleft,			"Turn Left",	JoyAx(3),	sc_LeftArrow,	-1, offsetof(TicCmd_t, controlx), 1, true },
+	{ bt_turnright,			"Turn Right",	JoyAx(3)+1,	sc_RightArrow,	-1, offsetof(TicCmd_t, controlx), 0, true },
+	{ bt_attack,			"Attack",		JoyAx(5)+1,	sc_UpArrow,		0,  CS_AxisDigital, 0, true },
+	{ bt_strafe,			"Strafe",		3,			sc_Alt,			-1, CS_AxisDigital, 0, true },
+	{ bt_run,				"Run",			2,			sc_LShift,		-1, CS_AxisDigital, 0, true },
+	{ bt_use,				"Use",			1,			sc_Space,		-1, CS_AxisDigital, 0, true },
+	{ bt_slot1,				"Slot 1",		-1,			sc_1,			-1, CS_AxisDigital, 0, true },
+	{ bt_slot2,				"Slot 2", 		-1,			sc_2,			-1, CS_AxisDigital, 0, true },
+	{ bt_slot3,				"Slot 3",		-1,			sc_3,			-1, CS_AxisDigital, 0, true },
+	{ bt_slot4,				"Slot 4",		-1,			sc_4,			-1, CS_AxisDigital, 0, true },
+	{ bt_slot5,				"Slot 5",		-1,			sc_5,			-1, CS_AxisDigital, 0, true },
+	{ bt_slot6,				"Slot 6",		-1,			sc_6,			-1, CS_AxisDigital, 0, true },
+	{ bt_slot7,				"Slot 7",		-1,			sc_7,			-1, CS_AxisDigital, 0, false },
+	{ bt_slot8,				"Slot 8",		-1,			sc_8,			-1, CS_AxisDigital, 0, false },
+	{ bt_slot9,				"Slot 9",		-1,			sc_9,			-1, CS_AxisDigital, 0, false },
+	{ bt_slot0,				"Slot 0",		-1,			sc_0,			-1, CS_AxisDigital, 0, false },
+	{ bt_nextweapon,		"Next Weapon",	4,			-1,				-1, CS_AxisDigital, 0, true },
+	{ bt_prevweapon,		"Prev Weapon",	5, 			-1,				-1, CS_AxisDigital, 0, true },
+	{ bt_altattack,			"Alt Attack",	-1,			-1,				-1, CS_AxisDigital, 0, false },
+	{ bt_reload,			"Reload",		-1,			-1,				-1, CS_AxisDigital, 0, false },
+	{ bt_zoom,				"Zoom",			-1,			-1,				-1, CS_AxisDigital, 0, false },
+	{ bt_automap,			"Automap",		-1,			-1,				-1, CS_AxisDigital, 0, true },
+	{ bt_showstatusbar,		"Show Status",	-1,			sc_Tab,			-1,	CS_AxisDigital, 0, true },
+	{ bt_pause,				"Pause",		-1,			sc_Pause,		-1, CS_AxisDigital, 0, true },
 
 	// End of List
-	{ bt_nobutton,			NULL, -1, -1, -1, NULL, 0 }
+	{ bt_nobutton,			NULL, -1, -1, -1, CS_AxisDigital, 0, false }
 };
 ControlScheme &schemeAutomapKey = controlScheme[25]; // When the input system is redone, hopefully we don't need this kind of thing
 
 ControlScheme amControlScheme[] =
 {
-	{ bt_zoomin,			"Zoom In",		JoyAx(2),	sc_Equals,		-1, NULL, 0 },
-	{ bt_zoomout,			"Zoom Out",		JoyAx(2)+1,	sc_Minus,		-1, NULL, 0 },
-	{ bt_panup,				"Pan Up",		JoyAx(1),	sc_UpArrow,		-1, &controlpany, 0 },
-	{ bt_pandown,			"Pan Down",		JoyAx(1)+1,	sc_DownArrow,	-1, &controlpany, 1 },
-	{ bt_panleft,			"Pan Left",		JoyAx(0),	sc_LeftArrow,	-1, &controlpanx, 0 },
-	{ bt_panright,			"Pan Right",	JoyAx(0)+1,	sc_RightArrow,	-1, &controlpanx, 1 },
+	{ bt_zoomin,			"Zoom In",		JoyAx(2),	sc_Equals,		-1, -1, 0 },
+	{ bt_zoomout,			"Zoom Out",		JoyAx(2)+1,	sc_Minus,		-1, -1, 0 },
+	{ bt_panup,				"Pan Up",		JoyAx(1),	sc_UpArrow,		-1, offsetof(TicCmd_t, controlpany), 0 },
+	{ bt_pandown,			"Pan Down",		JoyAx(1)+1,	sc_DownArrow,	-1, offsetof(TicCmd_t, controlpany), 1 },
+	{ bt_panleft,			"Pan Left",		JoyAx(0),	sc_LeftArrow,	-1, offsetof(TicCmd_t, controlpanx), 0 },
+	{ bt_panright,			"Pan Right",	JoyAx(0)+1,	sc_RightArrow,	-1, offsetof(TicCmd_t, controlpanx), 1 },
 
-	{ bt_nobutton,			NULL, -1, -1, -1, NULL, 0 }
+	{ bt_nobutton,			NULL, -1, -1, -1, -1, 0 }
 };
 
 void ControlScheme::setKeyboard(ControlScheme* scheme, Button button, int value)
@@ -152,8 +156,6 @@ void ControlScheme::setMouse(ControlScheme* scheme, Button button, int value)
 
 int viewsize;
 
-bool buttonheld[NUMBUTTONS], ambuttonheld[NUMAMBUTTONS];
-
 bool demorecord, demoplayback;
 int8_t *demoptr, *lastdemoptr;
 memptr demobuffer;
@@ -161,9 +163,8 @@ memptr demobuffer;
 //
 // current user input
 //
-int controlx, controly, controlstrafe;         // range from -100 to 100 per tic
-int controlpanx, controlpany;
-bool buttonstate[NUMBUTTONS], ambuttonstate[NUMAMBUTTONS];
+unsigned int ConsolePlayer = 0;
+TicCmd_t control[MAXPLAYERS];
 
 //===========================================================================
 
@@ -173,6 +174,71 @@ int StopMusic (void);
 void StartMusic (void);
 void ContinueMusic (int offs);
 void PlayLoop (void);
+
+/*
+=============================================================================
+
+							TIMING
+
+=============================================================================
+*/
+
+static int32_t lasttimecount;
+
+int32_t GetTimeCount()
+{
+	return MS2TICS(SDL_GetTicks());
+}
+
+/*
+=====================
+=
+= CalcTics
+=
+=====================
+*/
+
+void CalcTics()
+{
+//
+// calculate tics since last refresh for adaptive timing
+//
+
+	// Have we arrived too soon?
+	while(lasttimecount == GetTimeCount()+1)
+		SDL_Delay(1);
+
+	// Detect rollover, particularly if the game were paused for a LONG time
+	if(lasttimecount > GetTimeCount())
+		ResetTimeCount();
+
+	uint32_t curtime = SDL_GetTicks();
+	tics = MS2TICS(curtime) - lasttimecount;
+	if(!tics)
+	{
+		// wait until end of current tic
+		SDL_Delay(TICS2MS(lasttimecount + 1) - curtime);
+		tics = 1;
+	}
+	else if(noadaptive || Net::IsBlocked())
+		tics = 1;
+
+	lasttimecount += tics;
+
+	if (tics>MAXTICS)
+		tics = MAXTICS;
+}
+
+void ResetTimeCount()
+{
+	lasttimecount = GetTimeCount();
+}
+
+void Delay(int wolfticks)
+{
+	if(wolfticks>0)
+		SDL_Delay(TICS2MS(wolfticks));
+}
 
 /*
 =============================================================================
@@ -202,14 +268,14 @@ void PollKeyboardButtons (void)
 		{
 			if(amControlScheme[i].keyboard != -1 && Keyboard[amControlScheme[i].keyboard])
 			{
-				ambuttonstate[amControlScheme[i].button] = true;
+				control[ConsolePlayer].ambuttonstate[amControlScheme[i].button] = true;
 				jam[amControlScheme[i].keyboard] = true;
 			}
 		}
 		for(int i = 0;controlScheme[i].button != bt_nobutton;i++)
 		{
 			if(controlScheme[i].keyboard != -1 && Keyboard[controlScheme[i].keyboard] && !jam[controlScheme[i].keyboard])
-				buttonstate[controlScheme[i].button] = true;
+				control[ConsolePlayer].buttonstate[controlScheme[i].button] = true;
 		}
 	}
 	else
@@ -217,7 +283,7 @@ void PollKeyboardButtons (void)
 		for(int i = 0;controlScheme[i].button != bt_nobutton;i++)
 		{
 			if(controlScheme[i].keyboard != -1 && Keyboard[controlScheme[i].keyboard])
-				buttonstate[controlScheme[i].button] = true;
+				control[ConsolePlayer].buttonstate[controlScheme[i].button] = true;
 		}
 	}
 }
@@ -236,9 +302,36 @@ void PollMouseButtons (void)
 	int buttons = IN_MouseButtons();
 	for (int i = 0; controlScheme[i].button != bt_nobutton; i++)
 	{
-		if (controlScheme[i].mouse != -1 && (buttons & (1 << controlScheme[i].mouse)))
-			buttonstate[controlScheme[i].button] = true;
+		if (controlScheme[i].mouse == -1)
+			continue;
+
+		BYTE &state = control[ConsolePlayer].buttonstate[controlScheme[i].button];
+		switch(controlScheme[i].mouse)
+		{
+		case ControlScheme::MWheel_Left:
+			if (MouseWheel[di_west])
+				state = true;
+			break;
+		case ControlScheme::MWheel_Right:
+			if (MouseWheel[di_east])
+				state = true;
+			break;
+		case ControlScheme::MWheel_Down:
+			if (MouseWheel[di_south])
+				state = true;
+			break;
+		case ControlScheme::MWheel_Up:
+			if (MouseWheel[di_north])
+				state = true;
+			break;
+		default:
+			if ((buttons & (1 << controlScheme[i].mouse)))
+				state = true;
+			break;
+		}
 	}
+
+	IN_ClearWheel();
 }
 
 
@@ -267,12 +360,12 @@ void PollJoystickButtons (void)
 			{
 				if(amControlScheme[i].joystick < 32 && (buttons & (1<<amControlScheme[i].joystick)))
 				{
-					ambuttonstate[amControlScheme[i].button] = true;
+					control[ConsolePlayer].ambuttonstate[amControlScheme[i].button] = true;
 					jam[amControlScheme[i].joystick] = true;
 				}
-				else if(amControlScheme[i].axis == NULL && amControlScheme[i].joystick >= 32 && (axes & (1<<(amControlScheme[i].joystick-32))))
+				else if(amControlScheme[i].axis == -1 && amControlScheme[i].joystick >= 32 && (axes & (1<<(amControlScheme[i].joystick-32))))
 				{
-					ambuttonstate[amControlScheme[i].button] = true;
+					control[ConsolePlayer].ambuttonstate[amControlScheme[i].button] = true;
 					jam[amControlScheme[i].joystick] = true;
 				}
 			}
@@ -282,9 +375,9 @@ void PollJoystickButtons (void)
 			if(controlScheme[i].joystick != -1 && !jam[controlScheme[i].joystick])
 			{
 				if(controlScheme[i].joystick < 32 && (buttons & (1<<controlScheme[i].joystick)))
-					buttonstate[controlScheme[i].button] = true;
-				else if(controlScheme[i].axis == NULL && controlScheme[i].joystick >= 32 && (axes & (1<<(controlScheme[i].joystick-32))))
-					buttonstate[controlScheme[i].button] = true;
+					control[ConsolePlayer].buttonstate[controlScheme[i].button] = true;
+				else if(controlScheme[i].axis == -1 && controlScheme[i].joystick >= 32 && (axes & (1<<(controlScheme[i].joystick-32))))
+					control[ConsolePlayer].buttonstate[controlScheme[i].button] = true;
 			}
 		}
 	}
@@ -297,9 +390,9 @@ void PollJoystickButtons (void)
 			if(controlScheme[i].joystick != -1)
 			{
 				if(controlScheme[i].joystick < 32 && (buttons & (1<<controlScheme[i].joystick)))
-					buttonstate[controlScheme[i].button] = true;
-				else if(controlScheme[i].axis == NULL && controlScheme[i].joystick >= 32 && (axes & (1<<(controlScheme[i].joystick-32))))
-					buttonstate[controlScheme[i].button] = true;
+					control[ConsolePlayer].buttonstate[controlScheme[i].button] = true;
+				else if(controlScheme[i].axis == -1 && controlScheme[i].joystick >= 32 && (axes & (1<<(controlScheme[i].joystick-32))))
+					control[ConsolePlayer].buttonstate[controlScheme[i].button] = true;
 			}
 		}
 	}
@@ -316,20 +409,22 @@ void PollJoystickButtons (void)
 
 void PollKeyboardMove (void)
 {
-	int delta = (!alwaysrun && buttonstate[bt_run]) || (alwaysrun && !buttonstate[bt_run]) ? RUNMOVE : BASEMOVE;
+	TicCmd_t &cmd = control[ConsolePlayer];
 
-	if(buttonstate[bt_moveforward])
-		controly -= delta;
-	if(buttonstate[bt_movebackward])
-		controly += delta;
-	if(buttonstate[bt_turnleft])
-		controlx -= delta;
-	if(buttonstate[bt_turnright])
-		controlx += delta;
-	if(buttonstate[bt_strafeleft])
-		controlstrafe -= delta;
-	if(buttonstate[bt_straferight])
-		controlstrafe += delta;
+	int delta = (!alwaysrun && cmd.buttonstate[bt_run]) || (alwaysrun && !cmd.buttonstate[bt_run]) ? RUNMOVE : BASEMOVE;
+
+	if(cmd.buttonstate[bt_moveforward])
+		cmd.controly -= delta;
+	if(cmd.buttonstate[bt_movebackward])
+		cmd.controly += delta;
+	if(cmd.buttonstate[bt_turnleft])
+		cmd.controlx -= delta;
+	if(cmd.buttonstate[bt_turnright])
+		cmd.controlx += delta;
+	if(cmd.buttonstate[bt_strafeleft])
+		cmd.controlstrafe -= delta;
+	if(cmd.buttonstate[bt_straferight])
+		cmd.controlstrafe += delta;
 }
 
 
@@ -343,24 +438,24 @@ void PollKeyboardMove (void)
 
 void PollMouseMove (void)
 {
-	SDL_GetRelativeMouseState(&controlpanx, &controlpany);
+	SDL_GetRelativeMouseState(&control[ConsolePlayer].controlpanx, &control[ConsolePlayer].controlpany);
 
-	controlx += controlpanx * 20 / (21 - mousexadjustment);
+	control[ConsolePlayer].controlx += control[ConsolePlayer].controlpanx * 20 / (21 - mousexadjustment);
 	if(mouselook)
 	{
-		int mousey = controlpany;
+		int mousey = control[ConsolePlayer].controlpany;
 
-		if(players[0].ReadyWeapon && players[0].ReadyWeapon->fovscale > 0)
-			mousey = xs_ToInt(controlpany*fabs(players[0].ReadyWeapon->fovscale));
+		if(players[ConsolePlayer].ReadyWeapon && players[ConsolePlayer].ReadyWeapon->fovscale > 0)
+			mousey = xs_ToInt(control[ConsolePlayer].controlpany*fabs(players[ConsolePlayer].ReadyWeapon->fovscale));
 
-		players[0].mo->pitch += mousey * (ANGLE_1 / (21 - mouseyadjustment));
-		if(players[0].mo->pitch+ANGLE_180 > ANGLE_180+56*ANGLE_1)
-			players[0].mo->pitch = 56*ANGLE_1;
-		else if(players[0].mo->pitch+ANGLE_180 < ANGLE_180-56*ANGLE_1)
-			players[0].mo->pitch = ANGLE_NEG(56*ANGLE_1);
+		players[ConsolePlayer].mo->pitch += mousey * (ANGLE_1 / (21 - mouseyadjustment));
+		if(players[ConsolePlayer].mo->pitch+ANGLE_180 > ANGLE_180+56*ANGLE_1)
+			players[ConsolePlayer].mo->pitch = 56*ANGLE_1;
+		else if(players[ConsolePlayer].mo->pitch+ANGLE_180 < ANGLE_180-56*ANGLE_1)
+			players[ConsolePlayer].mo->pitch = ANGLE_NEG(56*ANGLE_1);
 	}
 	else if(!mouseyaxisdisabled)
-		controly += controlpany * 40 / (21 - mouseyadjustment);
+		control[ConsolePlayer].controly += control[ConsolePlayer].controlpany * 40 / (21 - mouseyadjustment);
 }
 
 
@@ -388,13 +483,13 @@ void PollJoystickMove (void)
 			int axis = clamp(abs(rawaxis)+1-dzfactor, 0, 0x8000)*5*JoySensitivity[axisnum].sensitivity/(0x8000-dzfactor);
 			if(useam)
 				axis >>= 2;
-			else if(buttonstate[bt_run])
+			else if(control[ConsolePlayer].buttonstate[bt_run])
 				axis <<= 1;
 			if(positive ^ (rawaxis < 0))
-				*scheme->axis += scheme->negative ? -axis : axis;
+				*(int*)((char*)&control[ConsolePlayer] + scheme->axis) += scheme->negative ? -axis : axis;
 		}
 	}
-	while((++scheme)->axis);
+	while((++scheme)->axis != CS_AxisDigital);
 }
 
 /*
@@ -419,17 +514,19 @@ void PollControls (bool absolutes)
 	int i;
 	byte buttonbits;
 
-	controlx = 0;
-	controly = 0;
-	controlpanx = 0;
-	controlpany = 0;
-	controlstrafe = 0;
-	memcpy (buttonheld, buttonstate, sizeof (buttonstate));
-	memset (buttonstate, 0, sizeof (buttonstate));
+	TicCmd_t &cmd = control[ConsolePlayer];
+
+	cmd.controlx = 0;
+	cmd.controly = 0;
+	cmd.controlpanx = 0;
+	cmd.controlpany = 0;
+	cmd.controlstrafe = 0;
+	memcpy (cmd.buttonheld, cmd.buttonstate, sizeof (cmd.buttonstate));
+	memset (cmd.buttonstate, 0, sizeof (cmd.buttonstate));
 	if (automap)
 	{
-		memcpy (ambuttonheld, ambuttonstate, sizeof (ambuttonstate));
-		memset (ambuttonstate, 0, sizeof (ambuttonstate));
+		memcpy (cmd.ambuttonheld, cmd.ambuttonstate, sizeof (cmd.ambuttonstate));
+		memset (cmd.ambuttonstate, 0, sizeof (cmd.ambuttonstate));
 	}
 
 	if (demoplayback)
@@ -440,12 +537,12 @@ void PollControls (bool absolutes)
 		buttonbits = *demoptr++;
 		for (i = 0; i < NUMBUTTONS; i++)
 		{
-			buttonstate[i] = buttonbits & 1;
+			cmd.buttonstate[i] = buttonbits & 1;
 			buttonbits >>= 1;
 		}
 
-		controlx = *demoptr++;
-		controly = *demoptr++;
+		cmd.controlx = *demoptr++;
+		cmd.controly = *demoptr++;
 
 		if (demoptr == lastdemoptr)
 			playstate = ex_completed;   // demo is done
@@ -458,7 +555,7 @@ void PollControls (bool absolutes)
 // get button states
 //
 	PollKeyboardButtons ();
-	
+
 	if (mouseenabled && IN_IsInputGrabbed())
 		PollMouseButtons ();
 
@@ -492,26 +589,51 @@ void PollControls (bool absolutes)
 		for (i = NUMBUTTONS - 1; i >= 0; i--)
 		{
 			buttonbits <<= 1;
-			if (buttonstate[i])
+			if (cmd.buttonstate[i])
 				buttonbits |= 1;
 		}
 
 		*demoptr++ = buttonbits;
-		*demoptr++ = controlx;
-		*demoptr++ = controly;
+		*demoptr++ = cmd.controlx;
+		*demoptr++ = cmd.controly;
 
 		if (demoptr >= lastdemoptr - 8)
 			playstate = ex_completed;
 	}
+	else if(Net::InitVars.mode != Net::MODE_SinglePlayer)
+		Net::PollControls();
 
 	// Check automap toggle before we set any buttons as held
-	if (buttonstate[bt_automap] && !buttonheld[bt_automap])
+	if (cmd.buttonstate[bt_automap] && !cmd.buttonheld[bt_automap])
 	{
 		AM_Toggle();
 	}
 	if (automap)
 	{
 		AM_CheckKeys();
+	}
+
+	for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
+	{
+		if(control[i].buttonstate[bt_pause] && !control[i].buttonheld[bt_pause])
+		{
+			Paused ^= 1;
+
+			static int lastoffs;
+			if(Paused & 1)
+			{
+				lastoffs = StopMusic();
+				IN_ReleaseMouse();
+			}
+			else
+			{
+				IN_GrabMouse();
+				ContinueMusic(lastoffs);
+				if (MousePresent && IN_IsInputGrabbed())
+					IN_CenterMouse();     // Clear accumulated mouse movement
+				ResetTimeCount();
+			}
+		}
 	}
 }
 
@@ -528,12 +650,12 @@ void ProcessEvents()
 		// wait up to DEMOTICS Wolf tics
 		uint32_t curtime = SDL_GetTicks();
 		lasttimecount += DEMOTICS;
-		int32_t timediff = (lasttimecount * 100) / 7 - curtime;
+		int32_t timediff = TICS2MS(lasttimecount) - curtime;
 		if(timediff > 0)
 			SDL_Delay(timediff);
 
 		if(timediff < -2 * DEMOTICS)       // more than 2-times DEMOTICS behind?
-			lasttimecount = (curtime * 7) / 100;    // yes, set to current timecount
+			lasttimecount = MS2TICS(curtime);    // yes, set to current timecount
 
 		tics = DEMOTICS;
 	}
@@ -555,8 +677,7 @@ void BumpGamma()
 	msg.Format("Gamma: %g", screenGamma);
 	US_PrintCentered (msg);
 	VW_UpdateScreen();
-	VW_UpdateScreen();
-	IN_Ack();
+	IN_Ack(ACK_Block);
 }
 
 /*
@@ -564,12 +685,15 @@ void BumpGamma()
 =
 = CheckKeys
 =
+= This should only cover control panel keys, debug mode key checks have been
+= moved to CheckDebugKeys.
+=
 =====================
 */
 
-bool changeSize = true;
 void CheckKeys (void)
 {
+	static bool changeSize = true;
 	ScanCode scan;
 
 
@@ -588,99 +712,16 @@ void CheckKeys (void)
 		if(Keyboard[sc_Equals] || Keyboard[sc_Minus])
 		{
 			SD_PlaySound("world/hitwall");
-			DrawPlayScreen();
+			if (viewsize < 21)
+				DrawPlayScreen();
 			changeSize = false;
 		}
 	}
 	else if(!Keyboard[sc_Equals] && !Keyboard[sc_Minus])
 		changeSize = true;
 
-	if(IWad::CheckGameFilter(NAME_Wolf3D))
-	{
-		//
-		// SECRET CHEAT CODE: TAB-G-F10
-		//
-		if (Keyboard[sc_Tab] && Keyboard[sc_G] && Keyboard[sc_F10])
-		{
-			DebugGod(false);
-			return;
-		}
-
-		//
-		// SECRET CHEAT CODE: 'MLI'
-		//
-		if (Keyboard[sc_M] && Keyboard[sc_L] && Keyboard[sc_I])
-			DebugMLI();
-
-		//
-		// TRYING THE KEEN CHEAT CODE!
-		//
-		if (Keyboard[sc_B] && Keyboard[sc_A] && Keyboard[sc_T])
-		{
-			ClearMemory ();
-			ClearSplitVWB ();
-
-			Message ("Commander Keen is also\n"
-					"available from Apogee, but\n"
-					"then, you already know\n" "that - right, Cheatmeister?!");
-
-			IN_ClearKeysDown ();
-			IN_Ack ();
-
-			if (viewsize < 18)
-				StatusBar->RefreshBackground ();
-		}
-	}
-	else if(IWad::CheckGameFilter(NAME_Noah))
-	{
-		//
-		// Secret cheat code: JIM
-		//
-		if (Keyboard[sc_J] && Keyboard[sc_I] && Keyboard[sc_M])
-		{
-			DebugGod(true);
-
-			SteamWorks::CheatsEnabled();
-		}
-	}
-
-	//
-	// OPEN UP DEBUG KEYS
-	//
-	if (Keyboard[sc_BackSpace] && Keyboard[sc_LShift] && Keyboard[sc_Alt])
-	{
-		ClearMemory ();
-		ClearSplitVWB ();
-
-		Message ("Debugging keys are\nnow available!");
-		IN_ClearKeysDown ();
-		IN_Ack ();
-
-		DrawPlayBorderSides ();
-		DebugOk = 1;
-
-		SteamWorks::CheatsEnabled();
-	}
-
-//
-// pause key weirdness can't be checked as a scan code
-//
-	if(buttonstate[bt_pause]) Paused |= 1;
-	if(Paused & 1)
-	{
-		int lastoffs = StopMusic();
-		IN_ReleaseMouse();
-		VWB_DrawGraphic(TexMan("PAUSED"), (20 - 4)*8, 80 - 2*8);
-		VH_UpdateScreen();
-		IN_Ack ();
-		IN_GrabMouse();
-		Paused &= ~1;
-		ContinueMusic(lastoffs);
-		if (MousePresent && IN_IsInputGrabbed())
-			IN_CenterMouse();     // Clear accumulated mouse movement
-		lasttimecount = GetTimeCount();
-		return;
-	}
+	if(Keyboard[sc_Alt] && Keyboard[sc_Enter])
+		VL_ToggleFullscreen();
 
 //
 // F1-F7/ESC to enter control panel
@@ -688,26 +729,29 @@ void CheckKeys (void)
 	if (scan == sc_F10 ||
 		scan == sc_F9 || scan == sc_F7 || scan == sc_F8)     // pop up quit dialog
 	{
-		ClearMemory ();
 		ClearSplitVWB ();
 		US_ControlPanel (scan);
 
 		DrawPlayBorderSides ();
 
 		IN_ClearKeysDown ();
+
+		if(screenfaded && Net::IsBlocked())
+			PlayFrame();
 		return;
 	}
 
-	if ((scan >= sc_F1 && scan <= sc_F9) || scan == sc_Escape || buttonstate[bt_esc])
+	if ((scan >= sc_F1 && scan <= sc_F9) || scan == sc_Escape || control[ConsolePlayer].buttonstate[bt_esc])
 	{
 		int lastoffs = StopMusic ();
-		ClearMemory ();
+		SD_StopDigitized();
 
-		US_ControlPanel (buttonstate[bt_esc] ? sc_Escape : scan);
+		US_ControlPanel (control[ConsolePlayer].buttonstate[bt_esc] ? sc_Escape : scan);
+
+		IN_ClearKeysDown ();
 
 		if(screenfaded)
 		{
-			IN_ClearKeysDown ();
 			if (!startgame && !loadedgame)
 			{
 				VW_FadeOut();
@@ -717,13 +761,16 @@ void CheckKeys (void)
 			}
 			if (loadedgame)
 				playstate = ex_abort;
-			lasttimecount = GetTimeCount();
 			if (MousePresent && IN_IsInputGrabbed())
 				IN_CenterMouse();     // Clear accumulated mouse movement
+
+			// If another player is blocking the play sim we may need to refresh
+			// the frame now before we wait for input.
+			if (Net::IsBlocked())
+				PlayFrame();
 		}
 		else
 		{
-			IN_ClearKeysDown();
 			ContinueMusic (lastoffs);
 		}
 		return;
@@ -733,40 +780,6 @@ void CheckKeys (void)
 	{
 		BumpGamma();
 		return;
-	}
-
-//
-// TAB-? debug keys
-//
-	if (DebugOk)
-	{
-		// Jam debug sequence if we're trying to open the automap
-		// We really only need to check for the automap control since it's
-		// likely to be put in the Tab space and be tapped while using other controls
-		bool keyDown = Keyboard[sc_Tab] || Keyboard[sc_BackSpace] || Keyboard[sc_Grave];
-		if ((schemeAutomapKey.keyboard == sc_Tab || schemeAutomapKey.keyboard == sc_BackSpace || schemeAutomapKey.keyboard == sc_Grave)
-			&& (buttonstate[bt_automap] || buttonheld[bt_automap]))
-			keyDown = false;
-
-#ifdef __ANDROID__
-		// Soft keyboard
-		if (ShadowingEnabled)
-			keyDown = true;
-#endif
-
-		if (keyDown)
-		{
-			if (DebugKeys ())
-			{
-				if (viewsize < 20)
-					StatusBar->RefreshBackground ();       // dont let the blue borders flash
-
-				if (MousePresent && IN_IsInputGrabbed())
-					IN_CenterMouse();     // Clear accumulated mouse movement
-
-				lasttimecount = GetTimeCount();
-			}
-		}
 	}
 }
 
@@ -791,18 +804,7 @@ void CheckKeys (void)
 */
 int StopMusic (void)
 {
-	int lastoffs = 0;
-
-    if (music == NULL)
-    {
-        lastoffs = SD_MusicOff ();
-    }
-    else
-    {
-        lastoffs = SD_PauseMusic ();
-    }
-
-	return lastoffs;
+	return SD_MusicOff();
 }
 
 //==========================================================================
@@ -819,13 +821,14 @@ int StopMusic (void)
 void StartMusic ()
 {
 	SD_MusicOff ();
-	SD_StartMusic(levelInfo->Music);
+	SD_StartMusic(levelInfo->GetMusic(map));
 }
 
 void ContinueMusic (int offs)
 {
 	SD_MusicOff ();
-	SD_ContinueMusic(levelInfo->Music, offs);
+	if(!(Paused & 1))
+		SD_ContinueMusic(levelInfo->GetMusic(map), offs);
 }
 
 /*
@@ -929,9 +932,9 @@ void UpdatePaletteShifts (void)
 
 	if (red)
 	{
-		V_SetBlend(RPART(players[0].mo->damagecolor),
-                             GPART(players[0].mo->damagecolor),
-                             BPART(players[0].mo->damagecolor), red*(174/NUMREDSHIFTS));
+		V_SetBlend(RPART(players[ConsolePlayer].mo->damagecolor),
+                             GPART(players[ConsolePlayer].mo->damagecolor),
+                             BPART(players[ConsolePlayer].mo->damagecolor), red*(174/NUMREDSHIFTS));
 		palshifted = true;
 	}
 	else if (white)
@@ -960,6 +963,9 @@ void UpdatePaletteShifts (void)
 
 void FinishPaletteShifts (void)
 {
+	damagecount = 0;
+	bonuscount = 0;
+
 	if (palshifted)
 	{
 		V_SetBlend(0, 0, 0, 0);
@@ -980,6 +986,47 @@ void FinishPaletteShifts (void)
 /*
 ===================
 =
+= PlayFrame
+=
+===================
+*/
+
+void PlayFrame()
+{
+	UpdatePaletteShifts ();
+
+	ThreeDRefresh ();
+
+	if(automap && !gamestate.victoryflag)
+		BasicOverhead();
+	if(Paused & 1)
+		VWB_DrawGraphic(TexMan("PAUSED"), (20 - 4)*8, 80 - 2*8);
+
+	if(Net::IsBlocked())
+	{
+		ClearSplitVWB();
+		Message("Waiting for players to return");
+	}
+
+	if (!loadedgame)
+	{
+		StatusBar->Tick();
+		if ((gamestate.TimeCount & 1) || !(tics & 1))
+			StatusBar->DrawStatusBar();
+	}
+
+	if (screenfaded)
+	{
+		VW_FadeIn ();
+		ResetTimeCount();
+	}
+
+	VH_UpdateScreen();
+}
+
+/*
+===================
+=
 = PlayLoop
 =
 ===================
@@ -989,21 +1036,16 @@ int32_t funnyticount;
 
 void PlayLoop (void)
 {
-#if defined(USE_FEATUREFLAGS) && defined(USE_CLOUDSKY)
+#if 0 // USE_CLOUDSKY
 	if(GetFeatureFlags() & FF_CLOUDSKY)
 		InitSky();
 #endif
 
-#ifdef __ANDROID__
-	if (ShadowingEnabled)
-		DebugOk = 1;
-#endif
-
 	playstate = ex_stillplaying;
-	lasttimecount = GetTimeCount();
+	ResetTimeCount();
 	frameon = 0;
 	funnyticount = 0;
-	memset (buttonstate, 0, sizeof (buttonstate));
+	memset (control[ConsolePlayer].buttonstate, 0, sizeof (control[ConsolePlayer].buttonstate));
 	ClearPaletteShifts ();
 
 	if(automap != AMA_Off)
@@ -1019,7 +1061,7 @@ void PlayLoop (void)
 		IN_CenterMouse();         // Clear accumulated mouse movement
 
 	if (demoplayback)
-		IN_StartAck ();
+		IN_StartAck (ACK_Local);
 
 	StatusBar->NewGame();
 
@@ -1033,35 +1075,33 @@ void PlayLoop (void)
 		madenoise = false;
 
 		// Run tics
-		if(Paused & 2)
+		for (unsigned int i = 0;i < tics;++i)
 		{
-			static bool absolutes = false;
+			PollControls(!i);
 
-			// If paused due to the automap, continue polling controls but don't tick anything.
-			PollControls(absolutes);
+			// Net code may require this loop to abort early
+			if(playstate != ex_stillplaying)
+				break;
 
-			absolutes = !absolutes;
-		}
-		else
-		{
-			for (unsigned int i = 0;i < tics;++i)
+			if(!Paused)
 			{
-				PollControls(!i);
-
 				++gamestate.TimeCount;
-				thinkerList->Tick();
+
+				CheckSpawnPlayer();
+
+				// In single player if the player dies only tick the pawn
+				if(Net::InitVars.mode != Net::MODE_SinglePlayer || players[0].state != player_t::PST_DEAD)
+					thinkerList.Tick();
+				else
+					thinkerList.Tick(ThinkerList::PLAYER);
+
 				AActor::FinishSpawningActors();
 			}
 		}
 
 		SteamWorks::AsyncTick();
 
-		UpdatePaletteShifts ();
-
-		ThreeDRefresh ();
-
-		if(automap && !gamestate.victoryflag)
-			BasicOverhead();
+		PlayFrame();
 
 		//
 		// MAKE FUNNY FACE IF BJ DOESN'T MOVE FOR AWHILE
@@ -1072,21 +1112,17 @@ void PlayLoop (void)
 		GC::CheckGC();
 
 		UpdateSoundLoc ();      // JAB
-		if (screenfaded)
-			VW_FadeIn ();
 
 		CheckKeys ();
-		if((gamestate.TimeCount & 1) || !(tics & 1))
-			StatusBar->DrawStatusBar();
+		CheckDebugKeys ();
 
-		VH_UpdateScreen();
 //
 // debug aids
 //
 		if (singlestep)
 		{
 			VW_WaitVBL (singlestep);
-			lasttimecount = GetTimeCount();
+			ResetTimeCount();
 		}
 		if (extravbls)
 			VW_WaitVBL (extravbls);

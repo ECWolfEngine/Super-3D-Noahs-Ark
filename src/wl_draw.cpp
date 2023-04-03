@@ -10,7 +10,7 @@
 #include "c_cvars.h"
 #include "r_sprites.h"
 #include "r_data/colormaps.h"
-
+#include "v_video.h"
 #include "wl_cloudsky.h"
 #include "wl_atmos.h"
 #include "wl_shade.h"
@@ -22,6 +22,7 @@
 #include "wl_agent.h"
 #include "wl_draw.h"
 #include "wl_game.h"
+#include "wl_net.h"
 #include "wl_play.h"
 #include "wl_state.h"
 #include "a_inventory.h"
@@ -50,15 +51,18 @@
 */
 
 void DrawFloorAndCeiling(byte *vbuf, unsigned vbufPitch, int min_wallheight);
+void DrawParallax(byte *vbuf, unsigned vbufPitch);
 
 const RatioInformation AspectCorrection[] =
 {
-	/* UNC */	{960,	600,	0x10000,	0,				48,			false},
-	/* 16:9 */	{1280,	450,	0x15555,	0,				48*3/4,		true},
-	/* 16:10 */	{1152,	500,	0x13333,	0,				48*5/6,		true},
-	/* 17:10 */ {1224,	471,	0x14666,	0,				48*40/51,	true},
-	/* 4:3 */	{960,	600,	0x10000,	0,				48,			false},
-	/* 5:4 */	{960,	640,	0x10000,(fixed)6.5*FRACUNIT,	48*15/16,	false}
+	/* UNC		*/  {960,  600, 0x10000, 0,                    48,         false},
+	/* 16:9		*/  {1280, 450, 0x15555, 0,                    48*3/4,     true},
+	/* 16:10	*/  {1152, 500, 0x13333, 0,                    48*5/6,     true},
+	/* 17:10	*/  {1224, 471, 0x14666, 0,                    48*40/51,   true},
+	/* 4:3 		*/  {960,  600, 0x10000, 0,                    48,         false},
+	/* 5:4		*/  {960,  640, 0x10000, (fixed) 6.5*FRACUNIT, 48*15/16,   false},
+	/* 64:27	*/  {1720, 346, 0x1C71C, 0,                    48*173/300, true},
+	/* 32:9		*/  {2560, 600, 0x2AAAB, 0,					   48*3/8,     true}
 };
 
 /*static*/ byte *vbuf = NULL;
@@ -71,13 +75,13 @@ int		r_extralight;
 
 int fps_frames=0, fps_time=0, fps=0;
 
-int *wallheight;
+TUniquePtr<int[]> wallheight;
 int min_wallheight;
 
 //
 // math tables
 //
-short *pixelangle;
+TUniquePtr<short[]> pixelangle;
 fixed finetangent[FINEANGLES/2 + ANG180];
 fixed finesine[FINEANGLES+FINEANGLES/4];
 fixed *finecosine = finesine+ANG90;
@@ -98,7 +102,7 @@ int gLevelLight = LIGHTLEVEL_DEFAULT;
 void    TransformActor (AActor *ob);
 void    BuildTables (void);
 void    ClearScreen (void);
-int     CalcRotate (AActor *ob);
+unsigned int CalcRotate (AActor *ob);
 void    DrawScaleds (void);
 void    CalcTics (void);
 void    ThreeDRefresh (void);
@@ -213,7 +217,7 @@ void TransformActor (AActor *ob)
 //
 // calculate height (heightnumerator/(nx>>8))
 //
-	ob->viewheight = (word)(heightnumerator/(nx>>8));
+	ob->viewheight = (word)((heightnumerator<<8)/nx);
 }
 
 //==========================================================================
@@ -233,7 +237,7 @@ int CalcHeight()
 	fixed z = FixedMul(xintercept - viewx, viewcos)
 		- FixedMul(yintercept - viewy, viewsin);
 	if(z < MINDIST) z = MINDIST;
-	int height = heightnumerator / (z >> 8);
+	int height = (heightnumerator << 8) / z;
 	if(height < min_wallheight) min_wallheight = height;
 	return height;
 }
@@ -263,7 +267,7 @@ void ScalePost()
 	const int tz = FixedMul(r_depthvisibility<<8, wallheight[postx]);
 	BYTE *curshades = &NormalLight.Maps[GETPALOOKUP(MAX(tz, MINZ), shade)<<8];
 
-	ywcount = yd = (wallheight[postx] >> 3);
+	ywcount = yd = wallheight[postx];
 	if(yd <= 0)
 		yd = 100;
 
@@ -271,20 +275,20 @@ void ScalePost()
 	{
 		// ywcount can be large enough to cause an overflow if we don't reduce
 		// fixed point precision here
-		const int topoffset = ywcount*(viewz>>8)/(32<<(FRACBITS-8));
-		const int botoffset = ywcount*((viewz - (64<<FRACBITS))>>8)/(32<<(FRACBITS-8));
+		const int topoffset = ywcount*((viewz + fixed(map->GetPlane(0).depth<<FRACBITS))>>8)/(32<<(FRACBITS-5));
+		const int botoffset = ywcount*(viewz>>8)/(32<<(FRACBITS-5));
 
 		yoffs = (viewheight / 2 - topoffset - viewshift) * vbufPitch;
 		if(yoffs < 0) yoffs = 0;
 		yoffs += postx;
 
 		yendoffs = viewheight / 2 - botoffset - 1 - viewshift;
-		yw=texyscale-1;
+		yw=(texyscale>>2)-1;
 	}
 
 	while(yendoffs >= viewheight)
 	{
-		ywcount -= texyscale/2;
+		ywcount -= texyscale;
 		while(ywcount <= 0)
 		{
 			ywcount += yd;
@@ -293,14 +297,14 @@ void ScalePost()
 		yendoffs--;
 	}
 	if(yw < 0)
-		return;
+		yw = (texyscale>>2) - ((-yw) % (texyscale>>2));
 
 	col = curshades[postsource[yw]];
 	yendoffs = yendoffs * vbufPitch + postx;
 	while(yoffs <= yendoffs)
 	{
 		vbuf[yendoffs] = col;
-		ywcount -= texyscale/2;
+		ywcount -= texyscale;
 		if(ywcount <= 0)
 		{
 			do
@@ -309,7 +313,7 @@ void ScalePost()
 				yw--;
 			}
 			while(ywcount <= 0);
-			if(yw < 0) break;
+			if(yw < 0) yw = (texyscale>>2)-1;
 			col = curshades[postsource[yw]];
 		}
 		yendoffs -= vbufPitch;
@@ -391,13 +395,6 @@ void HitVertWall (void)
 	{
 		texture -= texture%texxscale;
 
-		if((pixx&3) && texture == lasttexture)
-		{
-			ScalePost();
-			postx = pixx;
-			wallheight[pixx] = wallheight[pixx-1];
-			return;
-		}
 		ScalePost();
 		wallheight[pixx] = CalcHeight();
 		if(postsource)
@@ -426,7 +423,7 @@ void HitVertWall (void)
 	{
 		texheight = source->GetHeight();
 		texxscale = TEXTUREBASE/source->xScale;
-		texyscale = (64*source->yScale)>>FRACBITS;
+		texyscale = source->yScale>>(FRACBITS-8);
 		texture -= texture%texxscale;
 
 		postsource = source->GetColumn(texture/texxscale, NULL);
@@ -472,13 +469,6 @@ void HitHorizWall (void)
 	{
 		texture -= texture%texxscale;
 
-		if((pixx&3) && texture == lasttexture)
-		{
-			ScalePost();
-			postx=pixx;
-			wallheight[pixx] = wallheight[pixx-1];
-			return;
-		}
 		ScalePost();
 		wallheight[pixx] = CalcHeight();
 		if(postsource)
@@ -507,7 +497,7 @@ void HitHorizWall (void)
 	{
 		texheight = source->GetHeight();
 		texxscale = TEXTUREBASE/source->xScale;
-		texyscale = (64*source->yScale)>>FRACBITS;
+		texyscale = source->yScale>>(FRACBITS-8);
 		texture -= texture%texxscale;
 
 		postsource = source->GetColumn(texture/texxscale, NULL);
@@ -533,18 +523,18 @@ void HitHorizWall (void)
 =====================
 */
 
-int CalcRotate (AActor *ob)
+unsigned int CalcRotate (AActor *ob)
 {
 	angle_t angle, viewangle;
 
 	// this isn't exactly correct, as it should vary by a trig value,
 	// but it is close enough with only eight rotations
 
-	viewangle = players[0].camera->angle + (centerx - ob->viewx)/8;
+	viewangle = players[ConsolePlayer].camera->angle + (centerx - ob->viewx)/8;
 
 	angle = viewangle - ob->angle;
 
-	angle+=ANGLE_45/2;
+	angle+= ANGLE_180 + ANGLE_45/2;
 
 	return angle/ANGLE_45;
 }
@@ -570,9 +560,6 @@ typedef struct
 	//		shapenum;
 	//short      flags;          // this must be changed to uint32_t, when you
 							// you need more than 16-flags for drawing
-#ifdef USE_DIR3DSPR
-	statobj_t *transsprite;
-#endif
 } visobj_t;
 
 visobj_t vislist[MAXVISABLE];
@@ -619,23 +606,15 @@ void DrawScaleds (void)
 			|| ( spots[7] && (spots[7]->visible && !spots[7]->tile) ) )
 		{
 			TransformActor (obj);
-			if (!obj->viewheight || (gamestate.victoryflag && obj == players[0].mo))
+			if (!obj->viewheight || (gamestate.victoryflag && obj == players[ConsolePlayer].mo))
 				continue;                                               // too close or far away
 
 			visptr->actor = obj;
 			visptr->viewheight = obj->viewheight;
 
 			if (visptr < &vislist[MAXVISABLE-1])    // don't let it overflow
-			{
-#ifdef USE_DIR3DSPR
-				visptr->transsprite = NULL;
-#endif
 				visptr++;
-			}
-			obj->flags |= FL_VISABLE;
 		}
-		else
-			obj->flags &= ~FL_VISABLE;
 	}
 
 //
@@ -661,11 +640,9 @@ void DrawScaleds (void)
 		//
 		// draw farthest
 		//
-#ifdef USE_DIR3DSPR
-		if(farthest->transsprite)
-			Scale3DShape(vbuf, vbufPitch, farthest->transsprite);
+		if(farthest->actor->flags & FL_BILLBOARD)
+			Scale3DSprite(farthest->actor, farthest->actor->state, farthest->viewheight);
 		else
-#endif
 			ScaleSprite(farthest->actor, farthest->actor->viewx, farthest->actor->state, farthest->viewheight);
 
 		farthest->viewheight = 32000;
@@ -688,53 +665,15 @@ void DrawPlayerWeapon (void)
 {
 	for(unsigned int i = 0;i < player_t::NUM_PSPRITES;++i)
 	{
-		if(!players[0].psprite[i].frame)
+		if(!players[ConsolePlayer].psprite[i].frame)
 			return;
 
 		fixed xoffset, yoffset;
-		players[0].BobWeapon(&xoffset, &yoffset);
+		players[ConsolePlayer].BobWeapon(&xoffset, &yoffset);
 
-		R_DrawPlayerSprite(players[0].ReadyWeapon, players[0].psprite[i].frame, players[0].psprite[i].sx+xoffset, players[0].psprite[i].sy+yoffset);
+		R_DrawPlayerSprite(players[ConsolePlayer].ReadyWeapon, players[ConsolePlayer].psprite[i].frame, players[ConsolePlayer].psprite[i].sx+xoffset, players[ConsolePlayer].psprite[i].sy+yoffset);
 	}
 }
-
-
-//==========================================================================
-
-
-/*
-=====================
-=
-= CalcTics
-=
-=====================
-*/
-
-void CalcTics (void)
-{
-//
-// calculate tics since last refresh for adaptive timing
-//
-	if (lasttimecount > (int32_t) GetTimeCount())
-		lasttimecount = GetTimeCount();    // if the game was paused a LONG time
-
-	uint32_t curtime = SDL_GetTicks();
-	tics = (curtime * 7) / 100 - lasttimecount;
-	if(!tics)
-	{
-		// wait until end of current tic
-		SDL_Delay(((lasttimecount + 1) * 100) / 7 - curtime);
-		tics = 1;
-	}
-	else if(noadaptive)
-		tics = 1;
-
-	lasttimecount += tics;
-
-	if (tics>MAXTICS)
-		tics = MAXTICS;
-}
-
 
 //==========================================================================
 
@@ -1191,14 +1130,14 @@ void WallRefresh (void)
 
 	min_wallheight = viewheight;
 	lastside = -1;                  // the first pixel is on a new wall
-	viewshift = FixedMul(focallengthy, finetangent[(ANGLE_180+players[0].camera->pitch)>>ANGLETOFINESHIFT]);
+	viewshift = FixedMul(focallengthy, finetangent[(ANGLE_180+players[ConsolePlayer].camera->pitch)>>ANGLETOFINESHIFT]);
 
 	
 	angle_t bobangle = ((gamestate.TimeCount<<13)/(20*TICRATE/35)) & FINEMASK;
-	const fixed playerMovebob = players[0].mo->GetClass()->Meta.GetMetaFixed(APMETA_MoveBob);
-	fixed curbob = gamestate.victoryflag ? 0 : FixedMul(FixedMul(players[0].bob, playerMovebob)>>1, finesine[bobangle]);
+	const fixed playerMovebob = players[ConsolePlayer].mo->GetClass()->Meta.GetMetaFixed(APMETA_MoveBob);
+	fixed curbob = gamestate.victoryflag ? 0 : FixedMul(FixedMul(players[ConsolePlayer].bob, playerMovebob)>>1, finesine[bobangle]);
 
-	viewz = (64<<FRACBITS) - players[0].mo->viewheight + curbob;
+	viewz = curbob - players[ConsolePlayer].mo->viewheight;
 
 	AsmRefresh();
 	ScalePost ();                   // no more optimization on last post
@@ -1206,23 +1145,46 @@ void WallRefresh (void)
 
 void CalcViewVariables()
 {
-	viewangle = players[0].camera->angle;
+	viewangle = players[ConsolePlayer].camera->angle;
 	midangle = viewangle>>ANGLETOFINESHIFT;
 	viewsin = finesine[viewangle>>ANGLETOFINESHIFT];
 	viewcos = finecosine[viewangle>>ANGLETOFINESHIFT];
-	viewx = players[0].camera->x - FixedMul(focallength,viewcos);
-	viewy = players[0].camera->y + FixedMul(focallength,viewsin);
+	viewx = players[ConsolePlayer].camera->x - FixedMul(focallength,viewcos);
+	viewy = players[ConsolePlayer].camera->y + FixedMul(focallength,viewsin);
 
 	focaltx = (short)(viewx>>TILESHIFT);
 	focalty = (short)(viewy>>TILESHIFT);
 
-	viewtx = (short)(players[0].camera->x >> TILESHIFT);
-	viewty = (short)(players[0].camera->y >> TILESHIFT);
+	viewtx = (short)(players[ConsolePlayer].camera->x >> TILESHIFT);
+	viewty = (short)(players[ConsolePlayer].camera->y >> TILESHIFT);
 
-	if(players[0].camera->player)
-		r_extralight = players[0].camera->player->extralight << 3;
+	if(players[ConsolePlayer].camera->player)
+		r_extralight = players[ConsolePlayer].camera->player->extralight << 3;
 	else
 		r_extralight = 0;
+}
+
+static TUniquePtr<FFader> fizzlein;
+void ThreeDStartFadeIn()
+{
+	// For multiplayer disable fade in since players need to be back in the
+	// action immediately after respawning.
+	if(Net::InitVars.mode != Net::MODE_SinglePlayer)
+		return;
+
+	switch(gameinfo.DeathTransition)
+	{
+		case GameInfo::TRANSITION_Fizzle:
+		{
+			FFizzleFader *fader = new FFizzleFader(0, 0, screenWidth, screenHeight, 20, true);
+			fader->CaptureFrame();
+			fizzlein.Reset(fader);
+			break;
+		}
+		case GameInfo::TRANSITION_Fade:
+			fizzlein.Reset(new FBlendFader(255, 0, 0, 0, 0, 24));
+			break;
+	}
 }
 
 //==========================================================================
@@ -1234,18 +1196,15 @@ void R_RenderView()
 //
 // follow the walls from there to the right, drawing as we go
 //
-#if defined(USE_FEATUREFLAGS) && defined(USE_STARSKY)
+#if 0 // USE_STARSKY
 	if(GetFeatureFlags() & FF_STARSKY)
 		DrawStarSky(vbuf, vbufPitch);
 #endif
 
 	WallRefresh ();
 
-#if defined(USE_FEATUREFLAGS) && defined(USE_PARALLAX)
-	if(GetFeatureFlags() & FF_PARALLAXSKY)
-		DrawParallax(vbuf, vbufPitch);
-#endif
-#if defined(USE_FEATUREFLAGS) && defined(USE_CLOUDSKY)
+	DrawParallax(vbuf, vbufPitch);
+#if 0 // USE_CLOUDSKY
 	if(GetFeatureFlags() & FF_CLOUDSKY)
 		DrawClouds(vbuf, vbufPitch, min_wallheight);
 #endif
@@ -1256,18 +1215,18 @@ void R_RenderView()
 //
 	DrawScaleds();                  // draw scaled stuff
 
-#if defined(USE_FEATUREFLAGS) && defined(USE_RAIN)
+#if 0 // USE_RAIN
 	if(GetFeatureFlags() & FF_RAIN)
 		DrawRain(vbuf, vbufPitch);
 #endif
-#if defined(USE_FEATUREFLAGS) && defined(USE_SNOW)
+#if 0 // USE_SNOW
 	if(GetFeatureFlags() & FF_SNOW)
 		DrawSnow(vbuf, vbufPitch);
 #endif
 
-	DrawPlayerWeapon ();    // draw players[0].mo's hands
+	DrawPlayerWeapon ();    // draw player's hands
 
-	if((buttonstate[bt_showstatusbar] || buttonheld[bt_showstatusbar]) && viewsize == 21)
+	if((control[ConsolePlayer].buttonstate[bt_showstatusbar] || control[ConsolePlayer].buttonheld[bt_showstatusbar]) && viewsize == 21)
 	{
 		ingame = false;
 		StatusBar->DrawStatusBar();
@@ -1275,7 +1234,7 @@ void R_RenderView()
 	}
 
 	// Always mark the current spot as visible in the automap
-	map->GetSpot(players[0].mo->tilex, players[0].mo->tiley, 0)->amFlags |= AM_Visible;
+	map->GetSpot(players[ConsolePlayer].mo->tilex, players[ConsolePlayer].mo->tiley, 0)->amFlags |= AM_Visible;
 }
 
 /*
@@ -1286,14 +1245,13 @@ void R_RenderView()
 ========================
 */
 
+
+
 void    ThreeDRefresh (void)
 {
 	// Ensure we have a valid camera
-	if(players[0].camera == NULL)
-		players[0].camera = players[0].mo;
-
-	if (fizzlein && gameinfo.DeathTransition == GameInfo::TRANSITION_Fizzle)
-		FizzleFadeStart();
+	if(players[ConsolePlayer].camera == NULL)
+		players[ConsolePlayer].camera = players[ConsolePlayer].mo;
 
 //
 // clear out the traced array
@@ -1311,18 +1269,24 @@ void    ThreeDRefresh (void)
 	VL_UnlockSurface();
 	vbuf = NULL;
 
+	if(player_t *player = players[ConsolePlayer].camera->player)
+	{
+		if(player->ScreenFader)
+			player->ScreenFader->Update();
+	}
+
 //
 // show screen and time last cycle
 //
 	if (fizzlein)
 	{
-		if(gameinfo.DeathTransition == GameInfo::TRANSITION_Fizzle)
-			FizzleFade(0, 0, screenWidth, screenHeight, 20, false);
-		else
-			VL_FadeIn(0, 255, 24);
-		fizzlein = false;
+		while(!fizzlein->Update())
+			VH_UpdateScreen();
+		VH_UpdateScreen();
+		fizzlein.Reset();
 
-		lasttimecount = GetTimeCount();          // don't make a big tic count
+		// don't make a big tic count
+		ResetTimeCount();
 	}
 	else if (fpscounter)
 	{

@@ -2,6 +2,7 @@
 
 #include "wl_def.h"
 #include "wl_menu.h"
+#include "wl_play.h"
 #include "id_sd.h"
 #include "id_vl.h"
 #include "id_vh.h"
@@ -87,7 +88,7 @@ static ETSAnchor anchor;
 =====================
 */
 
-void RipToEOL (void)
+static void RipToEOL (void)
 {
 	while (*text++ != '\n')         // scan to end of line
 		;
@@ -102,23 +103,20 @@ void RipToEOL (void)
 =====================
 */
 
-int ParseNumber (void)
+static int ParseNumber (void)
 {
-	char  ch;
-	char  num[80];
-	char *numptr;
-
 	//
 	// scan until a number is found
 	//
-	ch = *text;
+	char ch = *text;
 	while (ch < '0' || ch >'9')
 		ch = *++text;
 
 	//
 	// copy the number out
 	//
-	numptr = num;
+	char num[80];
+	char *numptr = num;
 	do
 	{
 		*numptr++ = ch;
@@ -142,7 +140,7 @@ int ParseNumber (void)
 =====================
 */
 
-void ParsePicCommand (bool helphack, bool norip=false)
+static void ParsePicCommand (bool helphack, bool norip=false)
 {
 	picy=ParseNumber();
 	picx=ParseNumber();
@@ -186,7 +184,7 @@ void ParsePicCommand (bool helphack, bool norip=false)
 }
 
 
-void ParseTimedCommand (bool helphack)
+static void ParseTimedCommand (bool helphack)
 {
 	ParsePicCommand(helphack, true);
 	picdelay=ParseNumber();
@@ -205,7 +203,7 @@ void ParseTimedCommand (bool helphack)
 =====================
 */
 
-void TimedPicCommand (bool helphack)
+static void TimedPicCommand (bool helphack)
 {
 	ParseTimedCommand (helphack);
 
@@ -235,11 +233,8 @@ void TimedPicCommand (bool helphack)
 =====================
 */
 
-void HandleCommand (bool helphack)
+static void HandleCommand (bool helphack)
 {
-	int     i,margin,top,bottom;
-	int     picmid;
-
 	switch (toupper(*++text))
 	{
 		case 'B':
@@ -263,13 +258,14 @@ void HandleCommand (bool helphack)
 			break;
 
 		case 'C':               // ^c<hex digit> changes text color
-			i = toupper(*++text);
+		{
+			char i = toupper(*++text);
 			if(i == '[') // Textcolo translation
 			{
 				fontcolor = 255;
 				const BYTE *colorname = (const BYTE *)(text);
 				textcolor = V_ParseFontColor(colorname, CR_UNTRANSLATED, CR_UNTRANSLATED+1);
-				while(*text++ != ']');
+				while(*text++ != ']') {}
 			}
 			else
 			{
@@ -289,6 +285,7 @@ void HandleCommand (bool helphack)
 				text++;
 			}
 			break;
+		}
 
 		case '>':
 			px = 160;
@@ -310,6 +307,9 @@ void HandleCommand (bool helphack)
 
 		case 'G':               // ^Gyyy,xxx,ppp draws graphic
 		{
+			int margin,top,bottom;
+			int picmid;
+
 			ParsePicCommand (helphack);
 
 			if(!picnum.isValid())
@@ -333,11 +333,13 @@ void HandleCommand (bool helphack)
 			if (bottom>=TEXTROWS)
 				bottom = TEXTROWS-1;
 
-			for (i=top;i<=bottom;i++)
+			for (int i=top;i<=bottom;i++)
+			{
 				if (picmid > SCREENMID)
 					rightmargin[i] = margin;
 				else
 					leftmargin[i] = margin;
+			}
 
 			//
 			// adjust this line if needed
@@ -358,10 +360,8 @@ void HandleCommand (bool helphack)
 =====================
 */
 
-void NewLine (void)
+static void NewLine (void)
 {
-	char    ch;
-
 	if (++rowon == TEXTROWS)
 	{
 		//
@@ -372,7 +372,7 @@ void NewLine (void)
 		{
 			if (*text == '^')
 			{
-				ch = toupper(*(text+1));
+				char ch = toupper(*(text+1));
 				if (ch == 'E' || ch == 'P')
 				{
 					layoutdone = true;
@@ -401,11 +401,9 @@ void NewLine (void)
 =====================
 */
 
-void HandleCtrls (void)
+static void HandleCtrls (void)
 {
-	char    ch;
-
-	ch = *text++;                   // get the character and advance
+	char ch = *text++; // get the character and advance
 
 	if (ch == '\n')
 	{
@@ -423,7 +421,7 @@ void HandleCtrls (void)
 =====================
 */
 
-void HandleWord (void)
+static void HandleWord (void)
 {
 	char    wword[WORDLIMIT];
 	int     wordindex;
@@ -435,11 +433,11 @@ void HandleWord (void)
 	//
 	wword[0] = *text++;
 	wordindex = 1;
-	while (*text>32)
+	while (byte(*text)>32)
 	{
 		wword[wordindex] = *text++;
 		if (++wordindex == WORDLIMIT)
-			Quit ("PageLayout: Word limit exceeded");
+			I_FatalError ("PageLayout: Word limit exceeded");
 	}
 	wword[wordindex] = 0;            // stick a null at end for C
 
@@ -486,12 +484,9 @@ void HandleWord (void)
 =====================
 */
 
-void PageLayout (bool shownumber, bool helphack)
+static void PageLayout (bool shownumber, bool helphack)
 {
-	int     i,oldfontcolor;
-	char    ch;
-
-	oldfontcolor = fontcolor;
+	const int oldfontcolor = fontcolor;
 
 	fontcolor = 0;
 
@@ -506,7 +501,7 @@ void PageLayout (bool shownumber, bool helphack)
 	VWB_DrawGraphic(TexMan("RGTWINDW"), 312, 8, MENU_CENTER);
 	VWB_DrawGraphic(TexMan("BOTWINDW"), 8, 176, MENU_CENTER);
 
-	for (i=0; i<TEXTROWS; i++)
+	for (int i=0; i<TEXTROWS; i++)
 	{
 		leftmargin[i] = LEFTMARGIN;
 		rightmargin[i] = SCREENPIXWIDTH-RIGHTMARGIN;
@@ -521,7 +516,7 @@ void PageLayout (bool shownumber, bool helphack)
 	// make sure we are starting layout text (^P first command)
 	// [BL] Why? How about assuming ^P?
 	//
-	while (*text <= 32)
+	while (byte(*text) <= 32)
 		text++;
 
 	if (*text == '^' && toupper(*(text+1)) == 'P')
@@ -537,7 +532,7 @@ void PageLayout (bool shownumber, bool helphack)
 	//
 	do
 	{
-		ch = *text;
+		unsigned char ch = *text;
 
 		if (ch == '^')
 			HandleCommand (helphack);
@@ -564,7 +559,7 @@ void PageLayout (bool shownumber, bool helphack)
 	if (shownumber)
 	{
 		FString str;
-		str.Format("pg %d of %d", pagenum, numpages);
+		str.Format(gameinfo.PageIndexText, pagenum, numpages);
 		px = 213;
 		py = 183;
 
@@ -586,7 +581,7 @@ void PageLayout (bool shownumber, bool helphack)
 =====================
 */
 
-void BackPage (void)
+static void BackPage (void)
 {
 	pagenum--;
 	do
@@ -611,20 +606,17 @@ void BackPage (void)
 =
 =====================
 */
-void CountPages (void)
+static void CountPages (void)
 {
-	const char    *bombpoint, *textstart;
-	char    ch;
-
-	textstart = text;
-	bombpoint = text+30000;
+	const char *textstart = text;
+	const char *bombpoint = text+30000;
 	numpages = pagenum = 0;
 
 	do
 	{
 		if (*text == '^')
 		{
-			ch = toupper(*++text);
+			char ch = toupper(*++text);
 			if (ch == 'P')          // start of a page
 				numpages++;
 			if (ch == 'E')          // end of file, so load graphics and return
@@ -651,7 +643,7 @@ void CountPages (void)
 
 	} while (text<bombpoint);
 
-	Quit ("CacheLayoutGraphics: No ^E to terminate file!");
+	I_FatalError ("CacheLayoutGraphics: No ^E to terminate file!");
 }
 
 /*
@@ -683,7 +675,7 @@ static void ShowBriefing(FString str)
 	DrawMultiLineText(str, font, textcolor, alignment, anchor);
 
 	VL_FadeIn(0,255,10);
-	IN_Ack();
+	IN_Ack(ACK_Any);
 }
 
 void DrawMultiLineText(const FString str, FFont *font, EColorRange color, ETSAlignment align, ETSAnchor anchor)
@@ -733,7 +725,7 @@ void DrawMultiLineText(const FString str, FFont *font, EColorRange color, ETSAli
 */
 
 // Helphack switches index 11 and 5 so that the keyboard/blaze pics are reversed.
-void ShowArticle (const char *article, bool helphack=false)
+static void ShowArticle (const char *article, bool helphack=false)
 {
 	bool newpage, firstpage;
 	ControlInfo ci;
@@ -845,7 +837,7 @@ void HelpScreens (void)
 		FMemLump lump = Wads.ReadLump(lumpNum);
 
 		backgroundFlat = TexMan(gameinfo.FinaleFlat);
-		ShowArticle((char*)lump.GetMem());
+		ShowArticle(reinterpret_cast<const char*>(lump.GetMem()));
 	}
 
 	VW_FadeOut();
@@ -868,7 +860,7 @@ static bool ShowText(const FString exitText, const FString flat, const FString m
 			Message (exitText);
 
 			IN_ClearKeysDown ();
-			IN_Ack ();
+			IN_Ack (ACK_Any);
 			return false;
 	
 		case ClusterInfo::EXIT_LUMP:
@@ -876,15 +868,11 @@ static bool ShowText(const FString exitText, const FString flat, const FString m
 			int lumpNum = Wads.CheckNumForName(exitText, ns_global);
 			if(lumpNum != -1)
 			{
-				FWadLump lump = Wads.OpenLumpNum(lumpNum);
-				char* text = new char[Wads.LumpLength(lumpNum)];
-				lump.Read(text, Wads.LumpLength(lumpNum));
+				FMemLump lump = Wads.ReadLump(lumpNum);
 
 				if(!music.IsEmpty())
 					StartCPMusic(music);
-				ShowArticle(text, !!(IWad::GetGame().Flags & IWad::HELPHACK));
-
-				delete[] text;
+				ShowArticle(reinterpret_cast<const char*>(lump.GetMem()), !!(IWad::GetGame().Flags & IWad::HELPHACK));
 			}
 
 			break;
@@ -913,8 +901,6 @@ bool EndText (int exitClusterNum, int enterClusterNum)
 	if(EndTextInProgress)
 		return false;
 	EndTextInProgress = true;
-
-	ClearMemory ();
 
 	// Determine if we're using an exit text or enter text. The enter text
 	// overrides the exit text since it's mainly used for entering secret levels.
@@ -986,8 +972,6 @@ bool EndText (int exitClusterNum, int enterClusterNum)
 // Episode start execute entertext.
 void EnterText(unsigned int cluster)
 {
-	ClearMemory ();
-
 	ClusterInfo &clusterInfo = ClusterInfo::Find(cluster);
 
 	if(!clusterInfo.EnterText.IsEmpty())

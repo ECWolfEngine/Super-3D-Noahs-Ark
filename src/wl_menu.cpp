@@ -9,6 +9,7 @@
 #include "m_random.h"
 #include "wl_def.h"
 #include "wl_menu.h"
+#include "wl_iwad.h"
 #include "id_ca.h"
 #include "id_sd.h"
 #include "id_in.h"
@@ -18,11 +19,13 @@
 #include "language.h"
 #include "w_wad.h"
 #include "c_cvars.h"
-#include "wl_agent.h"
 #include "g_mapinfo.h"
+#include "v_video.h"
+#include "wl_agent.h"
 #include "wl_inter.h"
 #include "wl_draw.h"
 #include "wl_game.h"
+#include "wl_net.h"
 #include "wl_play.h"
 #include "wl_text.h"
 #include "v_palette.h"
@@ -36,7 +39,7 @@
 #include <climits>
 
 static int	lastgamemusicoffset;
-const ClassDef *playerClass = NULL;
+static FName playerClass = NAME_None;
 EpisodeInfo	*episode = 0;
 int BORDCOLOR, BORD2COLOR, BORD3COLOR, BKGDCOLOR, STRIPE, STRIPEBG,
 	MENUWIN_BACKGROUND, MENUWIN_TOPBORDER, MENUWIN_BOTBORDER,
@@ -45,7 +48,10 @@ static MenuItem	*readThis;
 // Android version reads this elsewhere so non-static.
 bool menusAreFaded = true;
 
+EMenuStyle MenuStyle = MENUSTYLE_Wolf;
+
 MENU_LISTENER(EnterControlBase);
+MENU_LISTENER(JoinNetGame);
 
 Menu mainMenu(MENU_X, MENU_Y, MENU_W, 24);
 Menu optionsMenu(80, 80, 190, 28);
@@ -77,20 +83,23 @@ MENU_LISTENER(ViewScoresOrEndGame)
 	}
 	else
 	{
-		MenuFadeOut();
+		if (gameinfo.TrackHighScores == true && Net::InitVars.mode == Net::MODE_SinglePlayer)
+		{
+			MenuFadeOut();
 
-		StartCPMusic(gameinfo.ScoresMusic);
+			StartCPMusic(gameinfo.ScoresMusic);
 
-		DrawHighScores();
-		VW_UpdateScreen();
-		MenuFadeIn();
+			DrawHighScores();
+			VW_UpdateScreen();
+			MenuFadeIn();
 
-		IN_Ack();
+			IN_Ack(ACK_Local);
 
-		StartCPMusic(gameinfo.MenuMusic);
-		MenuFadeOut();
-		mainMenu.draw();
-		MenuFadeIn ();
+			StartCPMusic(gameinfo.MenuMusic);
+			MenuFadeOut();
+			mainMenu.draw();
+			MenuFadeIn ();
+		}
 	}
 	return true;
 }
@@ -109,7 +118,7 @@ MENU_LISTENER(QuitGame)
 			MenuFadeOut();
 		else
 			VW_FadeOut();
-		Quit(NULL);
+		Quit();
 	}
 
 	// special case
@@ -135,10 +144,10 @@ MENU_LISTENER(SetDigitalSound)
 }
 MENU_LISTENER(SetMusic)
 {
-	if(MusicMode != (which == 0 ? smm_Off : smm_AdLib))
+	if(MusicMode != (SMMode)which)
 	{
-		SD_SetMusicMode((which == 0 ? smm_Off : smm_AdLib));
-		if(which != 0)
+		SD_SetMusicMode((SMMode)which);
+		if(which != smm_Off)
 			StartCPMusic(gameinfo.MenuMusic);
 	}
 	return true;
@@ -159,9 +168,14 @@ MENU_LISTENER(EnterControlBase)
 
 MENU_LISTENER(SetPlayerClassAndSwitch)
 {
-	playerClass = ClassDef::FindClass(gameinfo.PlayerClasses[which]);
+	playerClass = gameinfo.PlayerClasses[which];
 
 	return true;
+}
+MENU_LISTENER(SetPlayerClassAndJoin)
+{
+	SetPlayerClassAndSwitch(which);
+	return JoinNetGame(which);
 }
 MENU_LISTENER(SetEpisodeAndSwitchToSkill)
 {
@@ -174,7 +188,7 @@ MENU_LISTENER(SetEpisodeAndSwitchToSkill)
 				"from the Options menu to\n"
 				"find out how to order this\n" "episode from Apogee.");
 		IN_ClearKeysDown();
-		IN_Ack();
+		IN_Ack(ACK_Local);
 		episodes.draw();
 		return false;
 	}
@@ -202,11 +216,21 @@ MENU_LISTENER(StartNewGame)
 
 	if(episode == NULL)
 		episode = &EpisodeInfo::GetEpisode(0);
-	if(playerClass == NULL)
-		playerClass = ClassDef::FindClass(gameinfo.PlayerClasses[0]);
 
 	Menu::closeMenus();
 	NewGame(which, episode->StartMap, true, playerClass);
+
+	//
+	// CHANGE "READ THIS!" TO NORMAL COLOR
+	//
+	readThis->setHighlighted(false);
+
+	return true;
+}
+MENU_LISTENER(JoinNetGame)
+{
+	Menu::closeMenus();
+	NewGame(0, "", true);
 
 	//
 	// CHANGE "READ THIS!" TO NORMAL COLOR
@@ -227,10 +251,7 @@ MENU_LISTENER(ReadThis)
 }
 MENU_LISTENER(ToggleFullscreen)
 {
-	fullscreen = vid_fullscreen;
-	screen->Unlock();
-	VL_SetVGAPlaneMode();
-	screen->Lock(false);
+	VL_SetFullscreen(vid_fullscreen);
 	displayMenu.draw();
 
 	IN_AdjustMouse();
@@ -265,13 +286,22 @@ MENU_LISTENER(SetResolution)
 			Video->NextMode(&width, &height, &lb);
 		screenWidth = width;
 		screenHeight = height;
+
+		if(vid_fullscreen)
+		{
+			fullScreenWidth = screenWidth;
+			fullScreenHeight = screenHeight;
+		}
+		else
+		{
+			windowedScreenWidth = screenWidth;
+			windowedScreenHeight = screenHeight;
+		}
 	}
 
 	r_ratio = static_cast<Aspect>(CheckRatio(screenWidth, screenHeight));
 	VH_Startup(); // Recalculate fizzlefade stuff.
-	screen->Unlock();
 	VL_SetVGAPlaneMode();
-	screen->Lock(false);
 	EnterResolutionSelection(which);
 	resolutionMenu.draw();
 	MenuFadeIn();
@@ -335,6 +365,10 @@ MENU_LISTENER(AdjustViewSize)
 
 void CreateMenus()
 {
+	// HACK: Determine menu style by IWAD
+	if(IWad::CheckGameFilter("Blake"))
+		MenuStyle = MENUSTYLE_Blake;
+
 	// Extract the palette
 	BORDCOLOR = ColorMatcher.Pick(RPART(gameinfo.MenuColors[0]), GPART(gameinfo.MenuColors[0]), BPART(gameinfo.MenuColors[0]));
 	BORD2COLOR = ColorMatcher.Pick(RPART(gameinfo.MenuColors[1]), GPART(gameinfo.MenuColors[1]), BPART(gameinfo.MenuColors[1]));
@@ -357,6 +391,8 @@ void CreateMenus()
 	const bool useEpisodeMenu = EpisodeInfo::GetNumEpisodes() > 1;
 	if(gameinfo.PlayerClasses.Size() > 1)
 		mainMenu.addItem(new MenuSwitcherMenuItem(language["STR_NG"], playerClasses));
+	else if(!Net::IsArbiter())
+		mainMenu.addItem(new MenuItem(language["STR_NG"], JoinNetGame));
 	else if(useEpisodeMenu)
 		mainMenu.addItem(new MenuSwitcherMenuItem(language["STR_NG"], episodes));
 	else
@@ -379,9 +415,11 @@ void CreateMenus()
 		const ClassDef *cls = ClassDef::FindClass(gameinfo.PlayerClasses[i]);
 		const char* displayName = cls->Meta.GetMetaString(APMETA_DisplayName);
 		if(!displayName)
-			Quit("Player class %s has no display name.", cls->GetName().GetChars());
-		MenuItem *tmp = new MenuSwitcherMenuItem(displayName, useEpisodeMenu ? episodes : skills, SetPlayerClassAndSwitch);
-		playerClasses.addItem(tmp);
+			I_FatalError("Player class %s has no display name.", cls->GetName().GetChars());
+		if(Net::IsArbiter())
+			playerClasses.addItem(new MenuSwitcherMenuItem(displayName, useEpisodeMenu ? episodes : skills, SetPlayerClassAndSwitch));
+		else
+			playerClasses.addItem(new MenuItem(displayName, SetPlayerClassAndJoin));
 	}
 
 	episodes.setHeadText(language["STR_WHICHEPISODE"]);
@@ -417,7 +455,7 @@ void CreateMenus()
 	// Collect options and defaults
 	const char* soundEffectsOptions[] = {language["STR_NONE"], language["STR_PC"], language["STR_ALSB"] };
 	const char* digitizedOptions[] = {language["STR_NONE"], language["STR_SB"] };
-	const char* musicOptions[] = { language["STR_NONE"], language["STR_ALSB"] };
+	const char* musicOptions[] = { language["STR_NONE"], language["STR_ALSB"], language["STR_MIDI"] };
 	if(!AdLibPresent && !SoundBlasterPresent)
 	{
 		soundEffectsOptions[2] = NULL;
@@ -443,6 +481,7 @@ void CreateMenus()
 	{
 		default: musicMode = 0; break;
 		case smm_AdLib: musicMode = 1; break;
+		case smm_Midi: musicMode = 2; break;
 	}
 	soundBase.setHeadText(language["STR_SOUNDCONFIG"]);
 	soundBase.addItem(new LabelMenuItem(language["STR_DIGITALDEVICE"]));
@@ -452,7 +491,7 @@ void CreateMenus()
 	soundBase.addItem(new MultipleChoiceMenuItem(SetSoundEffects, soundEffectsOptions, 3, soundEffectsMode));
 	soundBase.addItem(new SliderMenuItem(AdlibVolume, 150, MAX_VOLUME, language["STR_SOFT"], language["STR_LOUD"], SD_UpdatePCSpeakerVolume));
 	soundBase.addItem(new LabelMenuItem(language["STR_MUSICDEVICE"]));
-	soundBase.addItem(new MultipleChoiceMenuItem(SetMusic, musicOptions, 2, musicMode));
+	soundBase.addItem(new MultipleChoiceMenuItem(SetMusic, musicOptions, 3, musicMode));
 	soundBase.addItem(new SliderMenuItem(MusicVolume, 150, MAX_VOLUME, language["STR_SOFT"], language["STR_LOUD"], SD_UpdateMusicVolume));
 
 	controlBase.setHeadPicture("M_CONTRL");
@@ -483,7 +522,7 @@ void CreateMenus()
 		joySensitivity.addItem(new SliderMenuItem(JoySensitivity[i].deadzone, 150, 20, language["STR_SMALL"], language["STR_LARGE"]));
 	}
 
-	const char* aspectOptions[] = {"Aspect: Auto", "Aspect: 16:9", "Aspect: 16:10", "Aspect: 17:10", "Aspect: 4:3", "Aspect: 5:4"};
+	const char* aspectOptions[] = {"Aspect: Auto", "Aspect: 16:9", "Aspect: 16:10", "Aspect: 17:10", "Aspect: 4:3", "Aspect: 5:4", "Aspect: 21:9", "Aspect: 32:9"};
 	displayMenu.setHeadText(language["STR_DISPLAY"]);
 #ifndef __ANDROID__
 	displayMenu.addItem(new BooleanMenuItem(language["STR_FULLSCREEN"], vid_fullscreen, ToggleFullscreen));
@@ -492,10 +531,8 @@ void CreateMenus()
 	displayMenu.addItem(new BooleanMenuItem(language["STR_VSYNC"], vid_vsync, ToggleVsync));
 #endif
 	displayMenu.addItem(new BooleanMenuItem(language["STR_SMALLFEEDERS"], unscaledweapons, ChangeWeaponScale));
-	displayMenu.addItem(new MultipleChoiceMenuItem(SetAspectRatio, aspectOptions, 6, vid_aspect));
-#ifndef __ANDROID__
+	displayMenu.addItem(new MultipleChoiceMenuItem(SetAspectRatio, aspectOptions, 8, vid_aspect));
 	displayMenu.addItem(new MenuSwitcherMenuItem(language["STR_SELECTRES"], resolutionMenu, EnterResolutionSelection));
-#endif
 	displayMenu.addItem(new LabelMenuItem(language["STR_SCREENSIZE"]));
 	// Noah3D: Limit the menu to 20 since people maximize this value and wonder where the status bar went.
 	displayMenu.addItem(new SliderMenuItem(viewsize, 110, 20, language["STR_SMALL"], language["STR_LARGE"], AdjustViewSize));
@@ -534,8 +571,6 @@ void CreateMenus()
 	automapMenu.addItem(new BooleanMenuItem(language["STR_AMPAUSE"], am_pause, ChangeAutomapFlag));
 }
 
-static int SoundStatus = 1;
-
 ////////////////////////////////////////////////////////////////////
 //
 // Wolfenstein Control Panel!  Ta Da!
@@ -546,11 +581,44 @@ void US_ControlPanel (ScanCode scancode)
 	int which;
 	bool idEasterEgg = Wads.CheckNumForName("IDGUYPAL") != -1;
 
+	if (!Net::IsArbiter())
+	{
+		// Disable functions that should only be available to arbiter
+		switch(scancode)
+		{
+			case sc_F2:
+			case sc_F3:
+			case sc_F7:
+			case sc_F8:
+			case sc_F9:
+				return;
+			default:
+				break;
+		}
+	}
+
+	if (Net::InitVars.mode != Net::MODE_SinglePlayer)
+	{
+		// At this time we don't support saves in multiplayer
+		switch(scancode)
+		{
+			case sc_F2:
+			case sc_F3:
+			case sc_F8:
+			case sc_F9:
+				return;
+			default:
+				break;
+		}
+	}
+
 	if (ingame)
 	{
 		if (CP_CheckQuick (scancode))
 			return;
 		lastgamemusicoffset = StartCPMusic (gameinfo.MenuMusic);
+
+		Net::BlockPlaysim();
 
 		VW_FadeOut();
 	}
@@ -580,6 +648,10 @@ void US_ControlPanel (ScanCode scancode)
 			soundBase.show();
 			goto finishup;
 
+		case sc_F5:
+			displayMenu.show();
+			goto finishup;
+
 		case sc_F6:
 			controlBase.show ();
 			goto finishup;
@@ -594,18 +666,33 @@ void US_ControlPanel (ScanCode scancode)
 
 	if(ingame)
 	{
+		mainMenu[0]->setEnabled(Net::InitVars.mode == Net::MODE_SinglePlayer); // Require explicit end game for net games
 		mainMenu[mainMenu.countItems()-3]->setText(language["STR_EG"]);
+		mainMenu[mainMenu.countItems()-3]->setEnabled(Net::IsArbiter());
 		mainMenu[mainMenu.countItems()-2]->setText(language["STR_BG"]);
+		mainMenu[mainMenu.countItems()-2]->setEnabled(true);
 		mainMenu[mainMenu.countItems()-2]->setHighlighted(true);
-		mainMenu[3]->setEnabled(true);
+		mainMenu[3]->setEnabled(Net::InitVars.mode == Net::MODE_SinglePlayer);
 	}
 	else
 	{
-		mainMenu[mainMenu.countItems()-3]->setText(language["STR_VS"]);
+		mainMenu[0]->setEnabled(true);
+		if (gameinfo.TrackHighScores == true && Net::InitVars.mode == Net::MODE_SinglePlayer)
+		{
+			mainMenu[mainMenu.countItems()-3]->setText(language["STR_VS"]);
+			mainMenu[mainMenu.countItems()-3]->setEnabled(true);
+		}
+		else
+		{
+			mainMenu[mainMenu.countItems()-3]->setText(language["STR_EG"]);
+			mainMenu[mainMenu.countItems()-3]->setEnabled(false);
+		}
 		mainMenu[mainMenu.countItems()-2]->setText(language["STR_BD"]);
+		mainMenu[mainMenu.countItems()-2]->setEnabled(Net::InitVars.mode == Net::MODE_SinglePlayer);
 		mainMenu[mainMenu.countItems()-2]->setHighlighted(false);
 		mainMenu[3]->setEnabled(false);
 	}
+	mainMenu.validateCurPos();
 	mainMenu.draw();
 	MenuFadeIn ();
 	Menu::closeMenus(false);
@@ -628,7 +715,6 @@ void US_ControlPanel (ScanCode scancode)
 			{
 				MenuFadeOut ();
 				StartCPMusic ("XJAZNAZI");
-				ClearMemory ();
 				VL_ReadPalette("IDGUYPAL");
 
 				CA_CacheScreen(TexMan("IDGUYS"));
@@ -640,7 +726,7 @@ void US_ControlPanel (ScanCode scancode)
 				while (Keyboard[sc_I] || Keyboard[sc_D])
 					IN_WaitAndProcessEvents();
 				IN_ClearKeysDown ();
-				IN_Ack ();
+				IN_Ack (ACK_Local);
 
 				VW_FadeOut ();
 				VL_ReadPalette(gameinfo.GamePalette);
@@ -707,14 +793,14 @@ int CP_CheckQuick (ScanCode scancode)
 		// QUICKSAVE
 		//
 		case sc_F8:
-			GameSave::QuickSave();
+			GameSave::QuickLoadOrSave(false);
 			return 1;
 
 		//
 		// QUICKLOAD
 		//
 		case sc_F9:
-			GameSave::QuickLoad();
+			GameSave::QuickLoadOrSave(true);
 			return 1;
 
 		//
@@ -744,14 +830,11 @@ int CP_EndGame (int)
 {
 	int res;
 	res = Confirm (language["ENDGAMESTR"]);
-	mainMenu.draw();
+	if (!ingame)
+		mainMenu.draw();
 	if(!res) return 0;
 
-	players[0].lives = 0;
-	playstate = ex_died;
-	players[0].killerobj = NULL;
-	players[0].mo->Die();
-
+	Net::EndGame();
 	return 1;
 }
 
@@ -1088,8 +1171,9 @@ int StartCPMusic (const char* song)
 ///////////////////////////////////////////////////////////////////////////
 void CheckPause (void)
 {
+	static int SoundStatus = 1;
 	static int pauseofs = 0;
-	if (Paused & 1)
+	if (LastScan == sc_Pause)
 	{
 		switch (SoundStatus)
 		{
@@ -1097,14 +1181,13 @@ void CheckPause (void)
 				SD_ContinueMusic(gameinfo.MenuMusic, pauseofs);
 				break;
 			case 1:
-				pauseofs = music ? SD_PauseMusic() : SD_MusicOff();
+				pauseofs = SD_MusicOff();
 				break;
 		}
 
 		SoundStatus ^= 1;
 		VW_WaitVBL (3);
 		IN_ClearKeysDown ();
-		Paused &= ~1;
 	}
 }
 
@@ -1171,6 +1254,7 @@ void ShowMenu(Menu &menu)
 	Menu::closeMenus(false);
 	menu.show();
 
+	CleanupControlPanel();
 	IN_ClearKeysDown ();
 	VW_FadeOut();
 	if(viewsize != 21)
@@ -1182,7 +1266,7 @@ void ShowMenu(Menu &menu)
 	if (loadedgame)
 		playstate = ex_abort;
 
-	lasttimecount = GetTimeCount ();
+	ResetTimeCount();
 
 	if (MousePresent && IN_IsInputGrabbed())
 		IN_CenterMouse();     // Clear accumulated mouse movement

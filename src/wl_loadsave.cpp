@@ -57,6 +57,7 @@
 #include "wl_loadsave.h"
 #include "wl_main.h"
 #include "wl_menu.h"
+#include "wl_net.h"
 #include "wl_play.h"
 #include "textures/textures.h"
 #include "i_steamworks.h"
@@ -67,8 +68,9 @@ extern unsigned vbufPitch;
 
 namespace GameSave {
 
-long long SaveVersion = SAVEVER;
+unsigned long long SaveVersion = GetSaveVersion();
 DWORD SaveProdVersion = SAVEPRODVER;
+bool param_foreginsave = false;
 
 static const char* const NEW_SAVE = "    - NEW SAVE -";
 
@@ -178,6 +180,7 @@ public:
 							delete[] comment;
 						}
 
+						delete savePicture;
 						delete png;
 					}
 					if(file)
@@ -291,11 +294,11 @@ bool SetupSaveGames()
 				char* savesig = M_GetPNGText(png, "ECWolf Save Version");
 				if(savesig)
 				{
-					if(strncmp(savesig, SAVESIG, 10) != 0) // Should be "ECWOLFSAVE"
+					if(strncmp(savesig, GetSaveSignature(), 10) != 0) // Should be "ECWOLFSAVE"
 						sFile.oldVersion = true;
 					else
 					{
-						long long savever = atoll(savesig+10);
+						unsigned long long savever = atoll(savesig+10);
 						char *prodver = M_GetPNGText(png, "ECWolf Save Product Version");
 						// If the build was done in the revision control tree, then
 						// savever should be used for better precision.  Otherwise
@@ -318,7 +321,7 @@ bool SetupSaveGames()
 				char* checkFile = M_GetPNGText(png, "Map WAD");
 				if(checkFile)
 				{
-					if(Wads.CheckIfWadLoaded(checkFile) < 0)
+					if(Wads.CheckIfWadLoaded(checkFile) < 0 && !param_foreginsave)
 						sFile.hasFiles = false;
 					delete[] checkFile;
 				}
@@ -334,7 +337,7 @@ bool SetupSaveGames()
 					do
 					{
 						nextIndex = checkString.IndexOf(';', lastIndex);
-						if(Wads.CheckIfWadLoaded(checkString.Mid(lastIndex, nextIndex-lastIndex)) < 0)
+						if(Wads.CheckIfWadLoaded(checkString.Mid(lastIndex, nextIndex-lastIndex)) < 0 && !param_foreginsave)
 						{
 							sFile.hide = true;
 							break;
@@ -346,7 +349,7 @@ bool SetupSaveGames()
 					while(nextIndex != -1);
 
 					// See if we don't have the right number of iwads loaded.
-					if(expectedIwads != 0)
+					if(expectedIwads != 0 && !param_foreginsave)
 						sFile.hide = true;
 					else
 						canLoad = true;
@@ -441,7 +444,7 @@ MENU_LISTENER(PerformSaveGame)
 		saveGame.setCurrentPosition(saveGame.getNumItems()-1);
 		loadGame.setCurrentPosition(saveGame.getNumItems()-1);
 
-		mainMenu[2]->setEnabled(true);
+		mainMenu[2]->setEnabled(Net::InitVars.mode == Net::MODE_SinglePlayer);
 	}
 	else
 	{
@@ -474,8 +477,7 @@ MENU_LISTENER(LoadSaveGame)
 
 	loadedgame = true;
 	Load(SaveFile::files[menuItem->slotIndex].filename);
-	
-	ShootSnd();
+
 	if(!quickSaveLoad)
 		Menu::closeMenus(true);
 	else
@@ -487,7 +489,7 @@ MENU_LISTENER(LoadSaveGame)
 
 void InitMenus()
 {
-	bool canLoad = SetupSaveGames();
+	bool canLoad = SetupSaveGames() && Net::InitVars.mode == Net::MODE_SinglePlayer;
 
 	loadGame.setHeadPicture("M_LOADGM");
 	saveGame.setHeadPicture("M_SAVEGM");
@@ -498,21 +500,7 @@ void InitMenus()
 	saveItem->setEnabled(false);
 }
 
-void QuickSave()
-{
-	if(saveGame.getCurrentPosition() != 0)
-	{
-		quickSaveLoad = true;
-		PerformSaveGame(saveGame.getCurrentPosition());
-		quickSaveLoad = false;
-
-		return;
-	}
-
-	ShowMenu(saveGame);
-}
-
-void QuickLoad()
+void QuickLoadOrSave(bool load)
 {
 	if(saveGame.getCurrentPosition() != 0)
 	{
@@ -520,15 +508,15 @@ void QuickLoad()
 
 		quickSaveLoad = true;
 		FString string;
-		string.Format("%s\"%s\"?", language["STR_LGC"], SaveFile::files[menuItem->slotIndex].name.GetChars());
+		string.Format("%s\"%s\"?", language[load ? "STR_LGC" : "STR_SGC"], SaveFile::files[menuItem->slotIndex].name.GetChars());
 		if(Confirm(string))
-			LoadSaveGame(saveGame.getCurrentPosition()-1);
+			load ? LoadSaveGame(saveGame.getCurrentPosition()-1) : PerformSaveGame(saveGame.getCurrentPosition());
 		quickSaveLoad = false;
 
 		return;
 	}
 
-	ShowMenu(loadGame);
+	ShowMenu(load ? loadGame : saveGame);
 }
 
 static void Serialize(FArchive &arc)
@@ -545,8 +533,16 @@ static void Serialize(FArchive &arc)
 		gamestate.difficulty = &SkillInfo::GetSkill(difficulty);
 	}
 
-	arc << gamestate.playerClass
-		<< gamestate.secretcount
+	unsigned int maxPlayers = Net::InitVars.numPlayers;
+
+	arc << gamestate.playerClass[0];
+	if(SaveVersion >= 1599444347)
+	{
+		arc << maxPlayers;
+		for(unsigned int i = 1;i < maxPlayers;++i)
+			arc << gamestate.playerClass[i];
+	}
+	arc << gamestate.secretcount
 		<< gamestate.treasurecount
 		<< gamestate.killcount
 		<< gamestate.secrettotal
@@ -564,11 +560,12 @@ static void Serialize(FArchive &arc)
 	if(SaveVersion > 1395865826)
 		arc << LevelRatios.par;
 
-	thinkerList->Serialize(arc);
+	thinkerList.Serialize(arc);
 
 	arc << map;
 
-	players[0].Serialize(arc);
+	for(unsigned int i = 0;i < (SaveVersion >= 1656330251 ? maxPlayers : 1);++i)
+		players[i].Serialize(arc);
 }
 
 #define SNAP_ID MAKE_ID('s','n','A','p')
@@ -581,7 +578,7 @@ bool Load(const FString &filename)
 		Message(language["STR_FAILREAD"]);
 		printf("Could not open %s for reading.\n", GetFullSaveFileName(filename).GetChars());
 		IN_ClearKeysDown ();
-		IN_Ack ();
+		IN_Ack (ACK_Local);
 		return false;
 	}
 
@@ -641,7 +638,7 @@ void SaveScreenshot(FILE *file)
 
 	vid_aspect = ASPECT_16_10;
 	NewViewSize(21, SAVEPICWIDTH, SAVEPICHEIGHT);
-	CalcProjection(players[0].mo->radius);
+	CalcProjection(players[ConsolePlayer].mo->radius);
 	R_RenderView();
 
 	M_CreatePNG(file, vbuf, GPalette.BaseColors, SS_PAL, SAVEPICWIDTH, SAVEPICHEIGHT, vbufPitch);
@@ -661,16 +658,14 @@ bool Save(const FString &filename, const FString &title)
 		Message(language["STR_FAILWRITE"]);
 		printf("Could not open %s for writing.\n", GetFullSaveFileName(filename).GetChars());
 		IN_ClearKeysDown ();
-		IN_Ack ();
+		IN_Ack (ACK_Local);
 		return false;
 	}
 
 	if(!quickSaveLoad)
 		DrawLSAction(1);
-	else
-		Message (language["STR_SAVING"]);
 
-	SaveVersion = SAVEVER;
+	SaveVersion = GetSaveVersion();
 	SaveProdVersion = SAVEPRODVER;
 
 	// If we get hubs this will need to be moved so that we can have multiple of them
@@ -684,10 +679,10 @@ bool Save(const FString &filename, const FString &title)
 	SaveScreenshot(fileh);
 	M_AppendPNGText(fileh, "Software", "ECWolf");
 	M_AppendPNGText(fileh, "Engine", GAMESIG);
-	M_AppendPNGText(fileh, "ECWolf Save Version", SAVESIG);
+	M_AppendPNGText(fileh, "ECWolf Save Version", GetSaveSignature());
 	{
 		char saveprodver[11];
-		sprintf(saveprodver, "%u", SAVEPRODVER);
+		mysnprintf(saveprodver, 11, "%u", SAVEPRODVER);
 		M_AppendPNGText(fileh, "ECWolf Save Product Version", saveprodver);
 	}
 	M_AppendPNGText(fileh, "Title", title);

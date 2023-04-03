@@ -39,6 +39,10 @@ extern "C"
 #define boolean jboolean
 #include <jpeglib.h>
 #undef boolean
+
+// Minor conflict between jpeg and SDL header in some situations
+#undef HAVE_STDDEF_H
+#undef HAVE_STDLIB_H
 }
 
 #include "wl_def.h"
@@ -452,7 +456,7 @@ void FJPEGTexture::MakeTexture ()
 	}
 	catch (int)
 	{
-		Printf (TEXTCOLOR_ORANGE "   in texture %s\n", Name);
+		Printf (TEXTCOLOR_ORANGE "   in texture %s\n", Name.GetChars());
 		jpeg_destroy_decompress(&cinfo);
 	}
 	if (buff != NULL)
@@ -536,7 +540,7 @@ int FJPEGTexture::CopyTrueColorPixels(FBitmap *bmp, int x, int y, int rotate, FC
 	}
 	catch(int)
 	{
-		Printf (TEXTCOLOR_ORANGE "   in JPEG texture %s\n", Name);
+		Printf (TEXTCOLOR_ORANGE "   in JPEG texture %s\n", Name.GetChars());
 	}
 	jpeg_destroy_decompress(&cinfo);
 	if (buff != NULL) delete [] buff;

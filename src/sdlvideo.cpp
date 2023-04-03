@@ -236,6 +236,11 @@ void I_InitGraphics ()
 		return;
 	}
 
+#ifdef __ANDROID__
+	extern void Android_InitGraphics();
+	Android_InitGraphics();
+#endif
+
 	Video = new SDLVideo (0);
 	if (Video == NULL)
 		I_FatalError ("Failed to initialize display");
@@ -391,6 +396,7 @@ static MiniModeInfo WinModes[] =
 	{ 480, 360 },
 	{ 512, 288 },	// 16:9
 	{ 512, 384 },
+	{ 640, 270 },   // 64:27 (~21:9)
 	{ 640, 360 },	// 16:9
 	{ 640, 400 },
 	{ 640, 480 },
@@ -403,6 +409,7 @@ static MiniModeInfo WinModes[] =
 	{ 848, 480 },	// 16:9
 	{ 960, 600 },	// 16:10
 	{ 960, 720 },
+	{ 1024, 288 },  // 32:9
 	{ 1024, 576 },	// 16:9
 	{ 1024, 600 },	// 17:10
 	{ 1024, 640 },	// 16:10
@@ -411,6 +418,8 @@ static MiniModeInfo WinModes[] =
 	{ 1152, 648 },	// 16:9
 	{ 1152, 720 },	// 16:10
 	{ 1152, 864 },
+	{ 1280, 360 },  // 32:9
+	{ 1280, 540 },  // 64:27 (~21:9)
 	{ 1280, 720 },	// 16:9
 	{ 1280, 854 },
 	{ 1280, 800 },	// 16:10
@@ -428,17 +437,30 @@ static MiniModeInfo WinModes[] =
 	{ 1600, 1000 },	// 16:10
 	{ 1600, 1200 },
 	{ 1680, 1050 },	// 16:10
+	{ 1720, 720 },  // 43:18 (~21:9)
+	{ 1920, 540 },  // 32:9
 	{ 1920, 1080 },
 	{ 1920, 1200 },
+	{ 2048, 864 }, // 64:27 (~21:9)
 	{ 2048, 1536 },
+	{ 2240, 1400 }, // 16:10
+	{ 2304, 1440 }, // 16:10
+	{ 2560, 720 },  // 32:9
+	{ 2560, 1080 }, // 64:27 (~21:9)
 	{ 2560, 1440 },
 	{ 2560, 1600 },
 	{ 2560, 2048 },
 	{ 2880, 1800 },
+	{ 3072, 1920 }, // 16:10
 	{ 3200, 1800 },
+	{ 3440, 1440 }, // 43:18 (~21:9)
+	{ 3840, 1080 }, // 32:9
 	{ 3840, 2160 },
 	{ 3840, 2400 },
 	{ 4096, 2160 },
+	{ 4096, 2304 }, // 16:9
+	{ 4480, 2520 }, // 16:9
+	{ 5120, 1440 }, // 32:9
 	{ 5120, 2880 }
 };
 
@@ -463,6 +485,8 @@ void ScaleWithAspect (int &w, int &h, int Width, int Height)
 		case 2: yratio = 16./10.; break;
 		case 3: yratio = 17./10.; break;
 		case 4: yratio = 5./4.; break;
+		case 5: yratio = 64./27.; break;
+		case 6: yratio = 32./9.; break;
 		default: return;
 	}
 	double y = w/yratio;
@@ -532,6 +556,11 @@ DFrameBuffer *SDLVideo::CreateFrameBuffer (int width, int height, bool fullscree
 
 #if SDL_VERSION_ATLEAST(2,0,0)
 	SDL_Window *oldwin = NULL;
+#endif
+
+#if __ANDROID__
+	// Always fullscreen in Android
+	fullscreen = true;
 #endif
 
 	if (old != NULL)
@@ -635,7 +664,6 @@ void SDLVideo::SetWindowedScale (float scale)
 
 // FrameBuffer implementation -----------------------------------------------
 
-extern bool usedoublebuffering;
 #if SDL_VERSION_ATLEAST(2,0,0)
 SDLFB::SDLFB (int width, int height, bool fullscreen, SDL_Window *oldwin)
 #else
@@ -652,6 +680,9 @@ SDLFB::SDLFB (int width, int height, bool fullscreen)
 	FlashAmount = 0;
 
 #if SDL_VERSION_ATLEAST(2,0,0)
+	Renderer = NULL;
+	Texture = NULL;
+
 	if (oldwin)
 	{
 		// In some cases (Mac OS X fullscreen) SDL2 doesn't like having multiple windows which
@@ -663,9 +694,7 @@ SDLFB::SDLFB (int width, int height, bool fullscreen)
 	}
 	else
 	{
-		FString caption = GAMENAME " " DOTVERSIONSTR;
-
-		Screen = SDL_CreateWindow (caption,
+		Screen = SDL_CreateWindow (GetGameCaption(),
 			SDL_WINDOWPOS_UNDEFINED_DISPLAY(vid_adapter), SDL_WINDOWPOS_UNDEFINED_DISPLAY(vid_adapter),
 			width, height, (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
 
@@ -678,16 +707,19 @@ SDLFB::SDLFB (int width, int height, bool fullscreen)
 	ForceSDLFocus(Screen);
 #endif
 
-	Renderer = NULL;
-	Texture = NULL;
 	ResetSDLRenderer ();
+
+#ifdef __ANDROID__
+	extern void PostSDLCreateRenderer(SDL_Window *);
+	PostSDLCreateRenderer(Screen);
+#endif
 
 	for (i = 0; i < 256; i++)
 	{
 		GammaTable[0][i] = GammaTable[1][i] = GammaTable[2][i] = i;
 	}
 #else
-	SDL_WM_SetCaption(GAMENAME " " DOTVERSIONSTR, NULL);
+	SDL_WM_SetCaption(GetGameCaption(), NULL);
 
 	if(vid_displaybits == static_cast<unsigned>(-1))
 	{
@@ -701,9 +733,6 @@ SDLFB::SDLFB (int width, int height, bool fullscreen)
 
 	if (Screen == NULL)
 		return;
-
-	if((Screen->flags & SDL_DOUBLEBUF) != SDL_DOUBLEBUF)
-		usedoublebuffering = false;
 
 	for (i = 0; i < 256; i++)
 	{
@@ -791,6 +820,22 @@ void SDLFB::Update ()
 
 	DrawRateStuff ();
 
+	if (NeedGammaUpdate)
+	{
+		bool Windowed = false;
+		NeedGammaUpdate = false;
+		CalcGamma ((Windowed || rgamma == 0.f) ? Gamma : (Gamma * rgamma), GammaTable[0]);
+		CalcGamma ((Windowed || ggamma == 0.f) ? Gamma : (Gamma * ggamma), GammaTable[1]);
+		CalcGamma ((Windowed || bgamma == 0.f) ? Gamma : (Gamma * bgamma), GammaTable[2]);
+		NeedPalUpdate = true;
+	}
+
+	if (NeedPalUpdate)
+	{
+		NeedPalUpdate = false;
+		UpdateColors ();
+	}
+
 #if 0
 #ifndef __APPLE__
 	if(vid_maxfps && !cl_capfps)
@@ -853,6 +898,13 @@ void SDLFB::Update ()
 		//SDLFlipCycles.Clock();
 		SDL_RenderClear(Renderer);
 		SDL_RenderCopy(Renderer, Texture, NULL, NULL);
+
+#ifdef __ANDROID__
+		// Hack control overlay in
+		extern void frameControls();
+		frameControls();
+#endif
+
 		SDL_RenderPresent(Renderer);
 		//SDLFlipCycles.Unclock();
 	}
@@ -864,6 +916,7 @@ void SDLFB::Update ()
 		SDL_UpdateWindowSurface (Screen);
 		//SDLFlipCycles.Unclock();
 	}
+
 #else
 	if (SDL_LockSurface (Screen) == -1)
 		return;
@@ -905,22 +958,6 @@ void SDLFB::Update ()
 #endif
 
 	//BlitCycles.Unclock();
-
-	if (NeedGammaUpdate)
-	{
-		bool Windowed = false;
-		NeedGammaUpdate = false;
-		CalcGamma ((Windowed || rgamma == 0.f) ? Gamma : (Gamma * rgamma), GammaTable[0]);
-		CalcGamma ((Windowed || ggamma == 0.f) ? Gamma : (Gamma * ggamma), GammaTable[1]);
-		CalcGamma ((Windowed || bgamma == 0.f) ? Gamma : (Gamma * bgamma), GammaTable[2]);
-		NeedPalUpdate = true;
-	}
-	
-	if (NeedPalUpdate)
-	{
-		NeedPalUpdate = false;
-		UpdateColors ();
-	}
 }
 
 void SDLFB::UpdateColors ()
@@ -1010,6 +1047,10 @@ void SDLFB::GetFlashedPalette (PalEntry pal[256])
 
 void SDLFB::SetFullscreen (bool fullscreen)
 {
+#ifdef __ANDROID__
+	fullscreen = true;
+#endif
+
 #if SDL_VERSION_ATLEAST(2,0,0)
 	if (IsFullscreen() == fullscreen)
 		return;

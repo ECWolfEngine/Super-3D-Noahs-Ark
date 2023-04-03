@@ -60,6 +60,9 @@
 #include "g_shared/a_inventory.h"
 #include "thingdef/thingdef.h"
 #include "zdoomsupport.h"
+#ifdef _WIN32
+#include <malloc.h>
+#endif
 
 // These are special tokens found in the data stream of an archive.
 // Whenever a new object is encountered, it gets created using new and
@@ -429,7 +432,7 @@ void FCompressedFile::Explode ()
 		unsigned int *ints = (unsigned int *)(m_Buffer);
 		cprlen = BigLong(ints[0]);
 		expandsize = BigLong(ints[1]);
-		
+
 		expand = (unsigned char *)M_Malloc (expandsize);
 		if (cprlen)
 		{
@@ -827,7 +830,7 @@ void FArchive::WriteName (const char *name)
 
 const char *FArchive::ReadName ()
 {
-	BYTE id;
+	BYTE id = 0;
 
 	operator<< (id);
 	if (id == NIL_NAME)
@@ -935,57 +938,28 @@ FArchive &FArchive::operator<< (FString &str)
 	return *this;
 }
 
-FArchive &FArchive::operator<< (BYTE &c)
+FArchive& FArchive::StoreInt(void *p, size_t sz)
 {
-	if (m_Storing)
-		Write (&c, sizeof(BYTE));
+#ifdef __BIG_ENDIAN__
+  	if (m_Storing)
+		Write (p, sz);
 	else
-		Read (&c, sizeof(BYTE));
-	return *this;
-}
-
-FArchive &FArchive::operator<< (WORD &w)
-{
-	if (m_Storing)
-	{
-		WORD temp = SWAP_WORD(w);
-		Write (&temp, sizeof(WORD));
+		Read (p, sz);
+#else
+	union {
+		unsigned long long ull;
+		unsigned char b[8];
+	} buffer;
+  	if (m_Storing) {
+		for (size_t i = 0; i < sz; i++)
+			buffer.b[i] = ((unsigned char *)p)[sz - i - 1];
+		Write (buffer.b, sz);
+	} else {
+		Read (buffer.b, sz);
+		for (size_t i = 0; i < sz; i++)
+			((unsigned char *)p)[sz - i - 1] = buffer.b[i];
 	}
-	else
-	{
-		Read (&w, sizeof(WORD));
-		w = SWAP_WORD(w);
-	}
-	return *this;
-}
-
-FArchive &FArchive::operator<< (DWORD &w)
-{
-	if (m_Storing)
-	{
-		DWORD temp = SWAP_DWORD(w);
-		Write (&temp, sizeof(DWORD));
-	}
-	else
-	{
-		Read (&w, sizeof(DWORD));
-		w = SWAP_DWORD(w);
-	}
-	return *this;
-}
-
-FArchive &FArchive::operator<< (QWORD &w)
-{
-	if (m_Storing)
-	{
-		QWORD temp = SWAP_QWORD(w);
-		Write (&temp, sizeof(QWORD));
-	}
-	else
-	{
-		Read (&w, sizeof(QWORD));
-		w = SWAP_QWORD(w);
-	}
+#endif
 	return *this;
 }
 
@@ -1123,7 +1097,7 @@ FArchive &FArchive::WriteObject (DObject *obj)
 				player->mo == obj)
 			{
 				id[0] = NEW_PLYR_CLS_OBJ;
-				id[1] = (BYTE)(player - players);
+				id[1] = (BYTE)(player->GetPlayerNum());
 				Write (id, 2);
 			}
 			else
@@ -1155,7 +1129,7 @@ FArchive &FArchive::WriteObject (DObject *obj)
 					player->mo == obj)
 				{
 					id[0] = NEW_PLYR_OBJ;
-					id[1] = (BYTE)(player - players);
+					id[1] = (BYTE)(player->GetPlayerNum());
 					Write (id, 2);
 				}
 				else
@@ -1183,7 +1157,7 @@ FArchive &FArchive::WriteObject (DObject *obj)
 
 FArchive &FArchive::ReadObject (DObject* &obj, const ClassDef *wanttype)
 {
-	BYTE objHead;
+	BYTE objHead = 0;
 	const ClassDef *type;
 	BYTE playerNum;
 	DWORD index;
@@ -1313,7 +1287,7 @@ void FArchive::WriteSprite (int spritenum)
 	if (m_SpriteMap[spritenum] < 0)
 	{
 		m_SpriteMap[spritenum] = (int)(m_NumSprites++);
-		id = NEW_SPRITE; 
+		id = NEW_SPRITE;
 		Write (&id, 1);
 		DWORD spriteName = R_GetNameForSprite(spritenum);
 		Write (&spriteName, 4);

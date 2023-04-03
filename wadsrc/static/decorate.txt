@@ -5,6 +5,7 @@
 #include "actors/wolf/wolfguards.txt"
 #include "actors/wolf/wolfplayer.txt"
 #include "actors/wolf/wolfweapons.txt"
+#include "actors/wolf/macintosh.txt"
 #include "actors/noah/noahammo.txt"
 #include "actors/noah/noahanimals.txt"
 #include "actors/noah/noahbonus.txt"
@@ -13,3 +14,5 @@
 #include "actors/noah/noahkeys.txt"
 #include "actors/noah/noahplayer.txt"
 #include "actors/noah/noahweapons.txt"
+#include "actors/blake/blakedecorations.txt"
+#include "actors/blake/blakeweapons.txt"

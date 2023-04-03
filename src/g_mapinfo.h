@@ -31,7 +31,7 @@
 **
 **
 */
- 
+
 #ifndef __G_MAPINFO_H__
 #define __G_MAPINFO_H__
 
@@ -41,10 +41,13 @@
 #include "zstring.h"
 
 class ClassDef;
+class GameMap;
 
 extern class GameInfo
 {
 public:
+	GameInfo();
+
 	FString	SignonLump;
 	int		MenuFadeColor;
 	int		MenuColors[6];
@@ -54,6 +57,7 @@ public:
 	int		PsychedColors[2];
 	int 	PsychedOffset;
 	bool	DrawReadThis;
+	bool	TrackHighScores;
 
 	int		TitleTime;
 	FString	BorderFlat;
@@ -72,6 +76,7 @@ public:
 	FString FinaleFlat;
 	FString GameOverPic;
 	FString VictoryPic;
+	FString PageIndexText;
 	// Special stack for strings like the default translator.
 	// This will allow the previous default to be included.
 	class FStringStack
@@ -155,7 +160,8 @@ class LevelInfo
 public:
 	LevelInfo();
 	FTextureID GetBorderTexture() const;
-	FString GetName(const class GameMap *gm) const;
+	FString GetMusic(const GameMap *gm) const;
+	FString GetName(const GameMap *gm) const;
 
 	char			MapName[9];
 	FString			NextMap;
@@ -180,11 +186,16 @@ public:
 	int				LevelBonus;
 	unsigned int	LevelNumber;
 	bool			NoIntermission;
+	FTextureID		Sky;
+	double			SkyScrollSpeed;
+	int				SkyHorizonOffset;
 
 	bool			DeathCam;
 	bool			SecretDeathSounds;
 	bool			SpawnWithWeaponRaised;
 	bool			ForceTally;
+	bool			ResetHealth;
+	bool			ResetInventory;
 
 	TArray<const ClassDef *>	EnsureInventory;
 
@@ -202,6 +213,7 @@ public:
 
 protected:
 	friend class LevelInfoBlockParser;
+	friend void ParseMacMapList(int);
 
 	bool			UseMapInfoName;
 	FString			Name;
@@ -261,6 +273,8 @@ public:
 	unsigned int MapFilter;
 	bool FastMonsters;
 	bool QuizHints;
+	int LivesCount;
+	fixed ScoreMultiplier;
 
 	static unsigned int GetNumSkills();
 	static unsigned int GetSkillIndex(const SkillInfo &skill);

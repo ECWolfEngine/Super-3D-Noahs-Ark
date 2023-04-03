@@ -8,38 +8,12 @@ import android.view.KeyEvent;
 
 import com.beloko.idtech.QuakeControlInterface;
 import com.beloko.idtech.wolf3d.Game;
-import com.beloko.idtech.wolf3d.Game.GameView;
-import com.beloko.libsdl.SDLLib;
 
 public class NativeLib implements QuakeControlInterface{
 
-	public final static int WOLF_GAME = 0x0;
-	public final static int SOD_GAME  = 0x1;
-	public final static int SD2_GAME  = 0x2;
-	public final static int SD3_GAME  = 0x3;
-
-
-
-	public static void loadLibraries(boolean demo)
-	{
-
-		try {
-			Log.i("JNI", "Trying to load libraries");
-
-			SDLLib.loadSDL();
-			System.loadLibrary("touchcontrols");
-
-			System.loadLibrary("noah3d");
-		}
-		catch (UnsatisfiedLinkError ule) {
-			Log.e("JNI", "WARNING: Could not load shared library: " + ule.toString());
-		}
-
-	}
-
 	public static native int init(String graphics_dir,int disableAlphaFix,String[] args,int game,String path);
 
-	public static native void setScreenSize( int width, int height );
+	//public static native void setScreenSize( int width, int height );
 
 	public static native int frame();
 
@@ -303,19 +277,6 @@ public class NativeLib implements QuakeControlInterface{
 			}
 		}
 		return 0;
-	} 
-
-	public static GameView gv;
-
-
-	static void swapBuffers()
-	{
-		boolean canDraw = false;
-		do
-		{
-			gv.swapBuffers();
-			canDraw = gv.setupSurface();
-		}while (!canDraw);
 	}
 
 	private static int pickedWad = -1;

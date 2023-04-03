@@ -8,6 +8,7 @@
 #include "actor.h"
 #include "m_random.h"
 #include "thingdef/thingdef.h"
+#include "wl_net.h"
 
 static const int MAX_RANDOMSPAWNERS_RECURSION = 32; // Should be largely more than enough, honestly.
 static FRandom pr_randomspawn("RandomSpawn");
@@ -28,7 +29,7 @@ class ARandomSpawner : public AActor
 		DropList::Iterator di; // di will be our drop item list iterator
 		DropList *drop; // while drop stays as the reference point.
 		int n=0;
-		//bool nomonsters = (dmflags & DF_NO_MONSTERS) || (level.flags2 & LEVEL2_NOMONSTERS);
+		bool nomonsters = Net::NoMonsters();
 
 		//Super::BeginPlay();
 		drop = GetDropList();
@@ -39,7 +40,7 @@ class ARandomSpawner : public AActor
 			{
 				if (di->className != NAME_None)
 				{
-					//if (!nomonsters || !(GetDefaultByType(PClass::FindClass(di->Name))->flags3 & MF3_ISMONSTER))
+					if (!nomonsters || !(ClassDef::FindClass(di->className)->GetDefault()->flags & FL_ISMONSTER))
 					{
 						if (di->amount == 0) di->amount = 1; // default value is -1, we need a positive value.
 						n += di->amount; // this is how we can weight the list.
@@ -60,8 +61,8 @@ class ARandomSpawner : public AActor
 			// And iterate in the array up to the random number chosen.
 			while (n > -1 && di)
 			{
-				if (di->className != NAME_None)// &&
-					//(!nomonsters || !(GetDefaultByType(PClass::FindClass(di->Name))->flags3 & MF3_ISMONSTER)))
+				if (di->className != NAME_None &&
+					(!nomonsters || !(ClassDef::FindClass(di->className)->GetDefault()->flags & FL_ISMONSTER)))
 				{
 					n -= di->amount;
 					if (di.HasNext() && (n > -1))
@@ -97,6 +98,9 @@ class ARandomSpawner : public AActor
 				if (cls != NULL)
 				{
 					Species = cls->GetName();
+					const AActor *defmobj = cls->GetDefault();
+					this->speed   =  defmobj->speed;
+					this->flags  |= (defmobj->flags  & FL_MISSILE);
 					/*AActor *defmobj = GetDefaultByType(cls);
 					this->Speed   =  defmobj->Speed;
 					this->flags  |= (defmobj->flags  & MF_MISSILE);
@@ -122,16 +126,23 @@ class ARandomSpawner : public AActor
 		//Super::PostBeginPlay();
 		if (Species == NAME_None) { Destroy(); return; }
 		const ClassDef * cls = ClassDef::FindClass(Species);
+		// Flags passed to Spawn(). Currently only SPAWN_Patrol is relevant, since
+		// class replacement is already handled in BeginPlay().
+		int spawnflags = 0;
+		if (flags & FL_PATHING) spawnflags |= SPAWN_Patrol;
 		/*if (this->flags & MF_MISSILE && target && target->target) // Attempting to spawn a missile.
 		{
 			if ((tracer == NULL) && (flags2 & MF2_SEEKERMISSILE)) tracer = target->target;
 			newmobj = P_SpawnMissileXYZ(x, y, z, target, target->target, cls, false);
 		}
-		else*/ newmobj = Spawn(cls, x, y, 0, false);
+		else*/ newmobj = Spawn(cls, x, y, 0, spawnflags);
 		if (newmobj != NULL)
 		{
 			// copy everything relevant
 			newmobj->angle = angle;
+			newmobj->dir = dir;
+			newmobj->flags |= (flags & FL_AMBUSH);
+			newmobj->target = target;
 			/*newmobj->SpawnAngle = newmobj->angle = angle;
 			newmobj->SpawnPoint[2] = SpawnPoint[2];
 			newmobj->special    = special;

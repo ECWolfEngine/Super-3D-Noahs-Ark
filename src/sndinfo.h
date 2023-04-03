@@ -36,16 +36,22 @@
 #define __SNDINFO_H__
 
 #include "tarray.h"
+#include "tmemory.h"
 #include "name.h"
 #include "zstring.h"
 
 class SoundInformation;
+
+struct Mix_Chunk;
+struct Mix_ChunkDeleter;
 
 class SoundIndex
 {
 	public:
 		SoundIndex(int index = 0) : index(index) {}
 		SoundIndex(const char* logical);
+
+		bool IsNull() const { return index == 0; }
 
 		operator int() const { return index; }
 	private:
@@ -63,27 +69,32 @@ class SoundData
 		};
 
 		SoundData();
-		SoundData(const SoundData &other);
 		~SoundData();
 
-		byte*			GetData(Type type=ADLIB) const { return data[type]; }
-		unsigned short	GetPriority() const { return priority; }
-		bool			HasType(Type type=ADLIB) const { return lump[type] != -1; }
-		bool			IsNull() const { return lump[0] == -1 && lump[1] == -1 && lump[2] == -1 && !isAlias; }
+		byte* GetAdLibData() const { return adlibData; }
+		Mix_Chunk *GetDigitalData() const { return digitalData; }
+		unsigned short GetPriority() const { return priority; }
+		byte* GetSpeakerData() const { return speakerData; }
+		bool HasType(Type type=ADLIB) const { return lump[type] != -1; }
+		bool IsNull() const { return lump[0] == -1 && lump[1] == -1 && lump[2] == -1 && !isAlias; }
 
-		const SoundData &operator= (const SoundData &other);
+	private:
+		const SoundData &operator= (const SoundData &);
+		SoundData(const SoundData &);
+
 	protected:
-		FString			logicalName;
-		SoundIndex		index;
-		byte*			data[3];
-		int				lump[3];
-		unsigned int	length[3];
-		unsigned short	priority;
+		FString logicalName;
+		SoundIndex index;
+		TUniquePtr<Mix_Chunk, Mix_ChunkDeleter> digitalData;
+		TUniquePtr<byte[]> adlibData, speakerData;
+		int lump[3];
+		unsigned short priority;
 
-		bool				isAlias;
-		TArray<SoundIndex>	aliasLinks;
+		bool isAlias;
+		TArray<SoundIndex> aliasLinks;
 
 		friend class SoundInformation;
+		friend struct TMoveInsert<SoundData>;
 };
 
 class SoundInformation
@@ -97,6 +108,7 @@ class SoundInformation
 		const SoundData	&operator[] (const char* logical) const { return operator[](FindSound(logical)); }
 		const SoundData	&operator[] (const SoundIndex &index) const;
 		uint32_t		GetLastPlayTick(const SoundData &sound) const { return lastPlayTicks[sound.index]; }
+		int				GetMusicLumpNum(FString song) const;
 		void			SetLastPlayTick(const SoundData &sound, uint32_t value) const { lastPlayTicks[sound.index] = value; }
 
 	protected:
@@ -105,9 +117,16 @@ class SoundInformation
 		void		ParseSoundInformation(int lumpNum);
 
 	private:
+		struct MusicData
+		{
+			FString Name;
+			int WadNum;
+		};
+
 		SoundData			nullIndex;
 		TArray<SoundData>	sounds;
 		TArray<uint32_t>	lastPlayTicks;
+		TMap<FName, MusicData> MusicAliases;
 
 		struct HashIndex;
 		HashIndex*	hashTable;

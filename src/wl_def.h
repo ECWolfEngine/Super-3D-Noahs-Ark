@@ -64,7 +64,10 @@ enum ESSType
 	SS_BGRA
 };
 
-void Quit(const char *errorStr, ...);
+void I_Error(const char* format, ...);
+void I_FatalError(const char *errorStr, ...);
+void Quit();
+void NetDPrintf(const char *format, ...);
 
 #define FIXED2FLOAT(fixed) ((double)(fixed)/65536.0)
 #define FLOAT2FIXED(x) (fixed_t((x)*FRACUNIT))
@@ -85,13 +88,17 @@ typedef SDWORD int32;
 =============================================================================
 */
 
-#define MAXPLAYERS		8 // You wish! :P  (This is just here to satisfy ZDoom stuff)
+#define MAXPLAYERS		11
 #define BODYQUESIZE		32
 #define NUMCOLORMAPS	64
 
 #define TICRATE 70
 #define MAXTICS 10
 #define DEMOTICS        4
+
+// Milliseconds/tics conversion with extra precision
+static inline uint32_t MS2TICS(uint32_t ms) { return ms * 7 / 100; }
+static inline uint32_t TICS2MS(uint32_t tics) { return tics * 100 / 7; }
 
 //
 // tile constants
@@ -177,31 +184,11 @@ typedef uint32_t angle_t;
 enum ActorFlag
 {
 	FL_SHOOTABLE        = 0x00000001,
-	FL_VISABLE          = 0x00000008,
 	FL_ATTACKMODE       = 0x00000010,
 	FL_FIRSTATTACK      = 0x00000020,
 	FL_AMBUSH           = 0x00000040,
 	FL_BRIGHT           = 0x00000100,
-#ifdef USE_DIR3DSPR
-	// you can choose one of the following values in wl_act1.cpp
-	// to make a static sprite a directional 3d sprite
-	// (see example at the end of the statinfo array)
-	FL_DIR_HORIZ_MID    = 0x00000200,
-	FL_DIR_HORIZ_FW     = 0x00000400,
-	FL_DIR_HORIZ_BW     = 0x00000600,
-	FL_DIR_VERT_MID     = 0x00000a00,
-	FL_DIR_VERT_FW      = 0x00000c00,
-	FL_DIR_VERT_BW      = 0x00000e00,
 
-	// these values are just used to improve readability of code
-	FL_DIR_NONE         = 0x00000000,
-	FL_DIR_POS_MID      = 0x00000200,
-	FL_DIR_POS_FW       = 0x00000400,
-	FL_DIR_POS_BW       = 0x00000600,
-	FL_DIR_POS_MASK     = 0x00000600,
-	FL_DIR_VERT_FLAG    = 0x00000800,
-	FL_DIR_MASK         = 0x00000e00,
-#endif
 	FL_ISMONSTER        = 0x00001000,
 	FL_CANUSEWALLS		= 0x00002000,
 	FL_COUNTKILL		= 0x00004000,
@@ -219,8 +206,7 @@ enum ActorFlag
 	FL_DONTRIP			= 0x04000000,
 	FL_OLDRANDOMCHASE	= 0x08000000,
 	FL_PLOTONAUTOMAP	= 0x10000000,
-
-	FL_PLAYERMISSILE	= 0x80000000, // Temporary until missile can keep the player as a target.
+	FL_BILLBOARD        = 0x20000000,
 };
 
 enum ItemFlag
@@ -229,6 +215,7 @@ enum ItemFlag
 	IF_INVBAR			= 0x00000002,
 	IF_ALWAYSPICKUP		= 0x00000004,
 	IF_INACTIVE			= 0x00000008, // For picked up items that remain on the map
+	IF_DROPPED			= 0x00000010,
 };
 
 enum WeaponFlag
@@ -324,19 +311,27 @@ enum Button
 
 struct ControlScheme
 {
-	public:
-		static void	setKeyboard(ControlScheme* scheme, Button button, int value);
-		static void setJoystick(ControlScheme* scheme, Button button, int value);
-		static void setMouse(ControlScheme* scheme, Button button, int value);
+public:
+	enum
+	{
+		MWheel_Left = 33,
+		MWheel_Right = 34,
+		MWheel_Down = 35,
+		MWheel_Up = 36
+	};
 
-		Button		button;
-		const char*	name;
-		int			joystick;
-		int			keyboard;
-		int			mouse;
-		int			*axis;
-		bool		negative;
-		bool		visible;
+	static void	setKeyboard(ControlScheme* scheme, Button button, int value);
+	static void setJoystick(ControlScheme* scheme, Button button, int value);
+	static void setMouse(ControlScheme* scheme, Button button, int value);
+
+	Button		button;
+	const char*	name;
+	int			joystick;
+	int			keyboard;
+	int			mouse;
+	int			axis;
+	bool		negative;
+	bool		visible;
 };
 
 extern ControlScheme controlScheme[];
@@ -398,20 +393,12 @@ static inline fixed FixedDiv(fixed a, fixed b)
 	return (fixed)(((((int64_t)a)<<32) / b) >> 16);
 }
 
-#define GetTicks() ((SDL_GetTicks()*7)/100)
-
-#define CHECKMALLOCRESULT(x) if(!(x)) Quit("Out of memory at %s:%i", __FILE__, __LINE__)
+#define CHECKMALLOCRESULT(x) if(!(x)) I_FatalError("Out of memory at %s:%i", __FILE__, __LINE__)
 
 #ifndef _WIN32
 	static inline char* itoa(int value, char* string, int radix)
 	{
-		sprintf(string, "%d", value);
-		return string;
-	}
-
-	static inline char* ltoa(long value, char* string, int radix)
-	{
-		sprintf(string, "%ld", value);
+		snprintf(string, 13, "%d", value);
 		return string;
 	}
 #endif
@@ -434,51 +421,5 @@ static inline longword READLONGWORD(byte *&ptr)
 	ptr += 4;
 	return val;
 }
-
-
-/*
-=============================================================================
-
-						FEATURE DEFINITIONS
-
-=============================================================================
-*/
-
-#ifdef USE_FEATUREFLAGS
-	// The currently available feature flags
-	#define FF_STARSKY      0x0001
-	#define FF_PARALLAXSKY  0x0002
-	#define FF_CLOUDSKY     0x0004
-	#define FF_RAIN         0x0010
-	#define FF_SNOW         0x0020
-
-	// The ffData... variables contain the 16-bit values of the according corners of the current level.
-	// The corners are overwritten with adjacent tiles after initialization in SetupGameLevel
-	// to avoid interpretation as e.g. doors.
-	extern int ffDataTopLeft, ffDataTopRight, ffDataBottomLeft, ffDataBottomRight;
-
-	/*************************************************************
-	* Current usage of ffData... variables:
-	* ffDataTopLeft:     lower 8-bit: ShadeDefID
-	* ffDataTopRight:    FeatureFlags
-	* ffDataBottomLeft:  CloudSkyDefID or ParallaxStartTexture
-	* ffDataBottomRight: unused
-	*************************************************************/
-
-	// The feature flags are stored as a wall in the upper right corner of each level
-	static inline word GetFeatureFlags()
-	{
-		return ffDataTopRight;
-	}
-
-#endif
-
-#ifdef USE_PARALLAX
-	void DrawParallax(byte *vbuf, unsigned vbufPitch);
-#endif
-
-#ifdef USE_DIR3DSPR
-	void Scale3DShape(byte *vbuf, unsigned vbufPitch, statobj_t *ob);
-#endif
 
 #endif

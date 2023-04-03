@@ -99,11 +99,17 @@ static const char* const tableHeaders[NUM_COLUMNS] = { "IWAD", "Game" };
 	for(int i = 0;i < numwads;i++)
 	{
 		NSMutableDictionary *record = [[NSMutableDictionary alloc] initWithCapacity:NUM_COLUMNS];
-		const char* filename = strrchr(wads[i].Extension, '/');
-		if(filename == NULL)
-			filename = wads[i].Extension;
+		FString filename;
+		if(wads[i].Path.Size() == 1)
+		{
+			filename = strrchr(wads[i].Path[0], '/');
+			if(filename.IsEmpty())
+				filename = wads[i].Path[0];
+			else
+				filename = filename.Mid(1);
+		}
 		else
-			filename++;
+			filename.Format("*.%s", wads[i].Extension.GetChars());
 		[record setObject:[NSString stringWithUTF8String:filename] forKey:[NSString stringWithUTF8String:tableHeaders[COLUMN_IWAD]]];
 		[record setObject:[NSString stringWithUTF8String:wads[i].Name] forKey:[NSString stringWithUTF8String:tableHeaders[COLUMN_GAME]]];
 		[data addObject:record];
@@ -266,11 +272,14 @@ static NSArray* GetKnownExtensions()
 
 - (int)pickIWad:(WadStuff *)wads num:(int) numwads showWindow:(bool) showwin defaultWad:(int) defaultiwad
 {
+	FString caption;
+	caption.Format("%s: Select an IWAD to use", GetGameCaption());
+
 	cancelled = false;
 
 	app = [NSApplication sharedApplication];
 	//id windowTitle = [NSString stringWithFormat:@"%s %s", GAMENAME, GetVersionString()];
-	id windowTitle = [NSString stringWithUTF8String:GAMESIG " " DOTVERSIONSTR ": Select an IWAD to use"];
+	id windowTitle = [NSString stringWithUTF8String:caption.GetChars()];
 
 	NSRect frame = NSMakeRect(0, 0, 440, 450);
 	window = [[NSWindow alloc] initWithContentRect:frame styleMask:NSTitledWindowMask backing:NSBackingStoreBuffered defer:NO];

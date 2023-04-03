@@ -1,6 +1,6 @@
 // WL_GAME.C
 
-#ifdef WINDOWS
+#ifdef _WIN32
 #include <io.h>
 #else
 #include <unistd.h>
@@ -22,8 +22,10 @@
 #include "g_intermission.h"
 #include "g_mapinfo.h"
 #include "r_sprites.h"
+#include "v_video.h"
 #include "wl_inter.h"
 #include "wl_draw.h"
+#include "wl_net.h"
 #include "wl_play.h"
 #include "wl_game.h"
 #include "wl_text.h"
@@ -55,14 +57,10 @@
 =============================================================================
 */
 
-bool			ingame,fizzlein;
+bool			ingame;
 gametype        gamestate;
 
 NewMap_t NewMap;
-
-#ifdef USE_FEATUREFLAGS
-int ffDataTopLeft, ffDataTopRight, ffDataBottomLeft, ffDataBottomRight;
-#endif
 
 //
 // ELEVATOR BACK MAPS - REMEMBER (-1)!!
@@ -194,36 +192,89 @@ SetSoundLoc(fixed gx,fixed gy)
 =
 ==========================
 */
-void PlaySoundLocGlobal(const char* s,fixed gx,fixed gy,int chan)
+void PlaySoundLocGlobal(const char* s,fixed gx,fixed gy,SoundChannel chan)
 {
 	SetSoundLoc(gx, gy);
 	SD_PositionSound(leftchannel, rightchannel);
 
-	int channel = SD_PlaySound(s, static_cast<SoundChannel> (chan));
-	if(channel)
+	int channel = SD_PlaySound(s, chan);
+	if(channel > 0)
 	{
+		channelSoundPos[channel - 1].source = NULL;
 		channelSoundPos[channel - 1].globalsoundx = gx;
 		channelSoundPos[channel - 1].globalsoundy = gy;
-		channelSoundPos[channel - 1].valid = 1;
+		channelSoundPos[channel - 1].valid = true;
+	}
+	else if(channel == -1)
+	{
+		AdlibSoundPos.source = NULL;
+		AdlibSoundPos.globalsoundx = gx;
+		AdlibSoundPos.globalsoundy = gy;
+		AdlibSoundPos.valid = true;
+	}
+}
+
+void PlaySoundLocActor(const char* s, AActor *ob, SoundChannel chan)
+{
+	SetSoundLoc(ob->x, ob->y);
+	SD_PositionSound(leftchannel, rightchannel);
+
+	int channel = SD_PlaySound(s, chan);
+	if(channel > 0)
+	{
+		channelSoundPos[channel - 1].source = ob;
+		channelSoundPos[channel - 1].globalsoundx = ob->x;
+		channelSoundPos[channel - 1].globalsoundy = ob->y;
+		channelSoundPos[channel - 1].valid = true;
+	}
+	else if(channel == -1)
+	{
+		AdlibSoundPos.source = ob;
+		AdlibSoundPos.globalsoundx = ob->x;
+		AdlibSoundPos.globalsoundy = ob->y;
+		AdlibSoundPos.valid = true;
 	}
 }
 
 void UpdateSoundLoc(void)
 {
-/*    if (SoundPositioned)
-	{
-		SetSoundLoc(globalsoundx,globalsoundy);
-		SD_SetPosition(leftchannel,rightchannel);
-	}*/
+	fixed x, y;
 
 	for(int i = 0; i < MIX_CHANNELS; i++)
 	{
-		if(channelSoundPos[i].valid)
+		if(channelSoundPos[i].valid && channelSoundPos[i].positioned)
 		{
-			SetSoundLoc(channelSoundPos[i].globalsoundx,
-				channelSoundPos[i].globalsoundy);
+			if(channelSoundPos[i].source)
+			{
+				x = channelSoundPos[i].source->x;
+				y = channelSoundPos[i].source->y;
+			}
+			else
+			{
+				x = channelSoundPos[i].globalsoundx;
+				y = channelSoundPos[i].globalsoundy;
+			}
+
+			SetSoundLoc(x, y);
 			SD_SetPosition(i, leftchannel, rightchannel);
 		}
+	}
+
+	if(AdlibSoundPos.valid && AdlibSoundPos.positioned)
+	{
+		if(AdlibSoundPos.source)
+		{
+			x = AdlibSoundPos.source->x;
+			y = AdlibSoundPos.source->y;
+		}
+		else
+		{
+			x = AdlibSoundPos.globalsoundx;
+			y = AdlibSoundPos.globalsoundy;
+		}
+
+		SetSoundLoc(x, y);
+		SD_SetPosition(-1, leftchannel, rightchannel);
 	}
 }
 
@@ -254,29 +305,18 @@ void SetupGameLevel (void)
 			= gamestate.secretcount
 			= gamestate.killcount
 			= gamestate.treasurecount = 0;
-		gamestate.faceframe.SetInvalid();
-		LastAttacker = NULL;
-		players[0].killerobj = NULL;
+		for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
+			players[i].killerobj = NULL;
 	}
+
+	gamestate.faceframe.SetInvalid();
 
 //
 // load the level
 //
 	CA_CacheMap (gamestate.mapname, loadedgame);
-	StartMusic ();
-
-#ifdef USE_FEATUREFLAGS
-	// Temporary definition to make things clearer
-	#define MXX MAPSIZE - 1
-
-	// Read feature flags data from map corners and overwrite corners with adjacent tiles
-	ffDataTopLeft     = MAPSPOT(0,   0,   0); MAPSPOT(0,   0,   0) = MAPSPOT(1,       0,       0);
-	ffDataTopRight    = MAPSPOT(MXX, 0,   0); MAPSPOT(MXX, 0,   0) = MAPSPOT(MXX,     1,       0);
-	ffDataBottomRight = MAPSPOT(MXX, MXX, 0); MAPSPOT(MXX, MXX, 0) = MAPSPOT(MXX - 1, MXX,     0);
-	ffDataBottomLeft  = MAPSPOT(0,   MXX, 0); MAPSPOT(0,   MXX, 0) = MAPSPOT(0,       MXX - 1, 0);
-
-	#undef MXX
-#endif
+	if (!loadedgame)
+		StartMusic ();
 
 //
 // spawn actors
@@ -284,10 +324,7 @@ void SetupGameLevel (void)
 	if(!loadedgame)
 	{
 		map->SpawnThings();
-
-		// Check to see if a player spawned
-		if(players[0].mo == NULL)
-			throw CRecoverableError("No player 1 start!");
+		CheckSpawnPlayer(true);
 	}
 }
 
@@ -539,8 +576,8 @@ void RecordDemo (void)
 
 	SetupGameLevel ();
 
-	if(usedoublebuffering) VH_UpdateScreen();
-	fizzlein = true;
+	VH_UpdateScreen();
+	ThreeDStartFadeIn();
 
 	PlayLoop ();
 
@@ -548,7 +585,6 @@ void RecordDemo (void)
 
 	StopMusic ();
 	VW_FadeOut ();
-	ClearMemory ();
 
 	FinishDemoRecord ();
 }
@@ -569,6 +605,7 @@ void RecordDemo (void)
 
 void PlayDemo (int demonumber)
 {
+#if 0
 	int length;
 	char demoName[9];
 	sprintf(demoName, "DEMO%d", demonumber);
@@ -606,7 +643,7 @@ void PlayDemo (int demonumber)
 	demoplayback = false;
 
 	StopMusic ();
-	ClearMemory ();
+#endif
 }
 
 //==========================================================================
@@ -621,112 +658,24 @@ void PlayDemo (int demonumber)
 
 void Died (void)
 {
-	float   fangle;
-	int32_t dx,dy;
-	angle_t iangle;
-
 	if (screenfaded)
 	{
 		ThreeDRefresh ();
 		VW_FadeIn ();
 	}
 
-	SD_PlaySound ("player/death");
+    if (gamestate.difficulty->LivesCount >= 0) {
+        --players[0].lives;
 
-	//
-	// swing around to face attacker
-	//
-	if(players[0].killerobj)
-	{
-		dx = players[0].killerobj->x - players[0].mo->x;
-		dy = players[0].mo->y - players[0].killerobj->y;
+        if (gameinfo.GameOverPic.IsNotEmpty() && players[0].lives == -1)
+        {
+            FTextureID texID = TexMan.CheckForTexture(gameinfo.GameOverPic, FTexture::TEX_Any);
+            if(texID.isValid())
+                R_DrawZoomer(texID);
+        }
+    }
 
-		fangle = (float) atan2((float) dy, (float) dx);     // returns -pi to pi
-		if (fangle<0)
-			fangle = (float) (M_PI*2+fangle);
-
-		iangle = (angle_t) (fangle*ANGLE_180/M_PI);
-	}
-	else
-	{
-		iangle = players[0].mo->angle;
-	}
-
-	static const angle_t DEATHROTATE = ANGLE_1*2;
-	angle_t &curangle = players[0].mo->angle;
-	const int rotate = curangle - iangle > ANGLE_180 ? 1 : -1;
-
-	do
-	{
-		for(unsigned int t = tics;t-- > 0;)
-		{
-			players[0].mo->Tick();
-
-			if (curangle - iangle < DEATHROTATE)
-				curangle = iangle;
-			else
-				curangle += rotate*DEATHROTATE;
-		}
-
-		ThreeDRefresh ();
-		VH_UpdateScreen();
-		CalcTics ();
-	} while (curangle != iangle);
-
-	// Wait for weapon to drop
-	while(players[0].psprite[player_t::ps_weapon].frame)
-	{
-		for(unsigned int t = tics;t-- > 0;)
-			players[0].mo->Tick();
-
-		ThreeDRefresh();
-		VH_UpdateScreen();
-		CalcTics();
-	}
-
-	//
-	// fade to red
-	//
-	FinishPaletteShifts ();
-
-	if(usedoublebuffering) VH_UpdateScreen();
-
-	--players[0].lives;
-
-	if (gameinfo.GameOverPic.IsNotEmpty() && players[0].lives == -1)
-	{
-		FTextureID texID = TexMan.CheckForTexture(gameinfo.GameOverPic, FTexture::TEX_Any);
-		if(texID.isValid())
-			R_DrawZoomer(texID);
-	}
-
-	if(gameinfo.DeathTransition == GameInfo::TRANSITION_Fizzle)
-	{
-		FizzleFadeStart();
-
-		// Fizzle fade used a slightly darker shade of red.
-		byte fr = RPART(players[0].mo->damagecolor)*2/3;
-		byte fg = GPART(players[0].mo->damagecolor)*2/3;
-		byte fb = BPART(players[0].mo->damagecolor)*2/3;
-		VWB_Clear(ColorMatcher.Pick(fr,fg,fb), viewscreenx, viewscreeny, viewwidth+viewscreenx, viewheight+viewscreeny);
-
-		IN_ClearKeysDown ();
-
-		FizzleFade(viewscreenx,viewscreeny,viewwidth,viewheight,70,false);
-
-		IN_UserInput(100);
-	}
-	else
-	{
-		// If we get a game over we will fade out any way
-		if(players[0].lives > -1)
-			VL_FadeOut(0, 255, 0, 0, 0, 64);
-	}
-
-	SD_WaitSoundDone ();
-	ClearMemory();
-
-	if (players[0].lives > -1)
+	if ((players[0].lives > -1) || (gamestate.difficulty->LivesCount < 0))
 		players[0].state = player_t::PST_REBORN;
 }
 
@@ -742,7 +691,7 @@ static void StripInventory(AActor *actor)
 			// Remove the inventory item and clean it up
 			AInventory *removeMe = inv;
 			inv = inv->inventory;
-			players[0].mo->RemoveInventory(removeMe);
+			actor->RemoveInventory(removeMe);
 			removeMe->Destroy();
 			continue;
 		}
@@ -769,16 +718,12 @@ bool GameLoop (void)
 	bool dointermission;
 
 restartgame:
-	ClearMemory ();
 	VW_FadeOut();
 	DrawPlayScreen ();
 	died = false;
 	dointermission = true;
 	do
 	{
-		if (!loadedgame)
-			players[0].score = players[0].oldscore;
-
 		startgame = false;
 		if (!loadedgame)
 		{
@@ -788,52 +733,72 @@ restartgame:
 				FinishTravel ();
 				if(playstate == ex_newmap)
 				{
-					if(NewMap.flags & NEWMAP_KEEPPOSITION)
+					// This logic could probably use refinement for multiplayer
+					for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
 					{
-						players[0].mo->x = NewMap.x;
-						players[0].mo->y = NewMap.y;
+						if(NewMap.flags & NEWMAP_KEEPPOSITION)
+						{
+							players[i].mo->x = NewMap.x;
+							players[i].mo->y = NewMap.y;
+						}
+						if(NewMap.flags & NEWMAP_KEEPFACING)
+							players[i].mo->angle = NewMap.angle;
 					}
-					if(NewMap.flags & NEWMAP_KEEPFACING)
-						players[0].mo->angle = NewMap.angle;
 				}
 			}
 
-			if(levelInfo->EnsureInventory.Size() > 0)
+			for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
 			{
-				for(unsigned int i = 0;i < levelInfo->EnsureInventory.Size();++i)
+				player_t &player = players[i];
+
+				player.score = player.oldscore;
+
+				if(levelInfo->ResetHealth)
+					player.health = player.mo->health = player.mo->SpawnHealth();
+
+				if(levelInfo->ResetInventory)
 				{
-					const ClassDef *ensure = levelInfo->EnsureInventory[i];
-					AInventory *holding = players[0].mo->FindInventory(ensure);
+					player.mo->ClearInventory();
+					player.mo->GiveStartingInventory();
+				}
 
-					if(ensure->IsDescendantOf(NATIVE_CLASS(Ammo)))
+				if(levelInfo->EnsureInventory.Size() > 0)
+				{
+					for(unsigned int i = 0;i < levelInfo->EnsureInventory.Size();++i)
 					{
-						// For ammo ensure we have the proper amount
-						AAmmo *ammo = static_cast<AAmmo*>(AActor::Spawn(ensure, 0, 0, 0, 0));
-						ammo->RemoveFromWorld();
+						const ClassDef *ensure = levelInfo->EnsureInventory[i];
+						AInventory *holding = player.mo->FindInventory(ensure);
 
-						if(!holding)
-							holding = players[0].mo->FindInventory(ammo->GetAmmoType());
-
-						if(holding && holding->amount < ammo->amount)
-							ammo->amount -= holding->amount;
-						else if(holding && holding->amount >= ammo->amount)
+						if(ensure->IsDescendantOf(NATIVE_CLASS(Ammo)))
 						{
-							ammo->Destroy();
-							ammo = NULL;
+							// For ammo ensure we have the proper amount
+							AAmmo *ammo = static_cast<AAmmo*>(AActor::Spawn(ensure, 0, 0, 0, 0));
+							ammo->RemoveFromWorld();
+
+							if(!holding)
+								holding = player.mo->FindInventory(ammo->GetAmmoType());
+
+							if(holding && holding->amount < ammo->amount)
+								ammo->amount -= holding->amount;
+							else if(holding && holding->amount >= ammo->amount)
+							{
+								ammo->Destroy();
+								ammo = NULL;
+							}
+
+							if(ammo && !ammo->CallTryPickup(player.mo))
+									ammo->Destroy();
+							continue;
 						}
 
-						if(ammo && !ammo->CallTryPickup(players[0].mo))
-								ammo->Destroy();
-						continue;
+						if(holding)
+							continue;
+
+						AInventory *item = static_cast<AInventory*>(AActor::Spawn(ensure, 0, 0, 0, 0));
+						item->RemoveFromWorld();
+						if(!item->CallTryPickup(player.mo))
+							item->Destroy();
 					}
-
-					if(holding)
-						continue;
-
-					AInventory *item = static_cast<AInventory*>(AActor::Spawn(ensure, 0, 0, 0, 0));
-					item->RemoveFromWorld();
-					if(!item->CallTryPickup(players[0].mo))
-						item->Destroy();
 				}
 			}
 		}
@@ -850,7 +815,7 @@ restartgame:
 		else
 		{
 			died = false;
-			fizzlein = true;
+			ThreeDStartFadeIn();
 		}
 
 		StatusBar->DrawStatusBar();
@@ -910,7 +875,6 @@ restartgame:
 						bool endSequence = next.IndexOf("EndSequence:") == 0;
 
 						VL_FadeOut(0, 255, RPART(levelInfo->ExitFadeColor), GPART(levelInfo->ExitFadeColor), BPART(levelInfo->ExitFadeColor), levelInfo->ExitFadeDuration);
-						ClearMemory();
 
 						if(dointermission)
 						{
@@ -922,8 +886,6 @@ restartgame:
 							}
 
 							Victory (false);
-
-							ClearMemory ();
 						}
 
 						bool gotoMenu = false;
@@ -933,30 +895,23 @@ restartgame:
 							gotoMenu = ShowIntermission(intermission);
 						}
 
-						ClearMemory();
-
-						CheckHighScore (players[0].score,levelInfo);
+						CheckHighScore (players[ConsolePlayer].score,levelInfo);
 						return gotoMenu;
 					}
 				}
 				else
 				{
-					NewMap.x = players[0].mo->x;
-					NewMap.y = players[0].mo->y;
-					NewMap.angle = players[0].mo->angle;
-
 					LevelInfo &teleportMap = LevelInfo::FindByNumber(NewMap.newmap);
 					if(teleportMap.MapName[0] == 0)
-						Quit("Tried to teleport to unkown map.");
+						I_FatalError("Tried to teleport to unkown map.");
 					next = teleportMap.MapName;
 				}
 
-				StripInventory(players[0].mo);
+				for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
+					StripInventory(players[i].mo);
 
 				if(dointermission)
 					VL_FadeOut(0, 255, RPART(levelInfo->ExitFadeColor), GPART(levelInfo->ExitFadeColor), BPART(levelInfo->ExitFadeColor), levelInfo->ExitFadeDuration);
-
-				ClearMemory ();
 
 				StartTravel ();
 				if(dointermission)
@@ -975,11 +930,12 @@ restartgame:
 
 				if(next.CompareNoCase("EndDemo") == 0)
 				{
-					CheckHighScore (players[0].score,levelInfo);
+					CheckHighScore (players[ConsolePlayer].score,levelInfo);
 					return false;
 				}
 
-				players[0].oldscore = players[0].score;
+				for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
+					players[i].oldscore = players[i].score;
 
 				strncpy(gamestate.mapname, next, 8);
 				gamestate.mapname[8] = 0;
@@ -990,25 +946,23 @@ restartgame:
 				Died ();
 				died = true;                    // don't "get psyched!"
 
-				if (players[0].lives > -1)
+				if ((players[0].lives > -1) || (gamestate.difficulty->LivesCount < 0))
 					break;                          // more lives left
 
 				VW_FadeOut ();
 				if(screenHeight % 200 != 0)
 					VL_ClearScreen(0);
 
-				ClearMemory ();
-
-				CheckHighScore (players[0].score,levelInfo);
+				CheckHighScore (players[ConsolePlayer].score,levelInfo);
 				return false;
 
 			case ex_warped:
-				players[0].state = player_t::PST_ENTER;
+				for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
+					players[i].state = player_t::PST_ENTER;
 				break;
 
 			default:
 				if(viewsize == 21) DrawPlayScreen();
-				ClearMemory ();
 				break;
 		}
 	} while (1);

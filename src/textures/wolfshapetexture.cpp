@@ -52,7 +52,7 @@
 class FWolfShapeTexture : public FTexture
 {
 public:
-	FWolfShapeTexture (int lumpnum, FileReader &file);
+	FWolfShapeTexture (int lumpnum, FileReader &file, bool mac=false);
 	~FWolfShapeTexture ();
 
 	const BYTE *GetColumn (unsigned int column, const Span **spans_out);
@@ -69,8 +69,19 @@ protected:
 	SWORD NormalTopOffset, NormalLeftOffset;
 	fixed NormalXScale, NormalYScale;
 
+	void Init (FileReader &file);
+	void InitMac (FileReader &file);
 	virtual void MakeTexture ();
 	void CheckSpriteSize();
+};
+
+class FMacShapeTexture : public FWolfShapeTexture
+{
+public:
+	FMacShapeTexture (int lumpnum, FileReader &file) : FWolfShapeTexture(lumpnum, file, true) {}
+
+protected:
+	void MakeTexture ();
 };
 
 //==========================================================================
@@ -94,17 +105,43 @@ static bool CheckIfWolfShape(FileReader &file)
 	if(Width <= 0 || Width > 256 || file.GetLength() < 4+Width*2)
 		return false;
 
-	WORD* offsets = new WORD[Width];
+	WORD offsets[256];
 	file.Read(offsets, Width*2);
 	for(int i = 0;i < Width;i++)
 	{
 		if(LittleShort(offsets[i]) >= file.GetLength())
-		{
-			delete[] offsets;
 			return false;
-		}
 	}
-	delete[] offsets;
+	return true;
+}
+
+static bool CheckIfMacShape(FileReader &file)
+{
+	if(file.GetLength() < 2) return false; // No header
+	
+	WORD width;
+	file.Seek(0, SEEK_SET);
+	file.Read(&width, sizeof(width));
+	width = BigShort(width);
+
+	if(width == 0)
+		return file.GetLength() == 2;
+
+	// No reason that I can think of for a shape to be larger than 128x128
+	if(width > 128 || file.GetLength() < 2 + width*2 ||
+		// Rule out excessively large files
+		file.GetLength() > 776*width + 2)
+		return false;
+
+	WORD runOfs[128];
+	file.Read(runOfs, width*2);
+	for(unsigned int i = 0;i < width;++i)
+	{
+		runOfs[i] = BigShort(runOfs[i]);
+		// Runs should start after the column directory and shouldn't go past the end of the lump.
+		if(runOfs[i] < 2+width*2 || file.GetLength() < runOfs[i]+8)
+			return false;
+	}
 	return true;
 }
 
@@ -121,6 +158,13 @@ FTexture *WolfShapeTexture_TryCreate(FileReader &file, int lumpnum)
 	return new FWolfShapeTexture(lumpnum, file);
 }
 
+FTexture *MacShapeTexture_TryCreate(FileReader &file, int lumpnum)
+{
+	if(!CheckIfMacShape(file))
+		return NULL;
+	return new FMacShapeTexture(lumpnum, file);
+}
+
 //==========================================================================
 //
 //
@@ -129,8 +173,16 @@ FTexture *WolfShapeTexture_TryCreate(FileReader &file, int lumpnum)
 
 extern bool unscaledweapons;
 
-FWolfShapeTexture::FWolfShapeTexture(int lumpnum, FileReader &file)
+FWolfShapeTexture::FWolfShapeTexture(int lumpnum, FileReader &file, bool mac)
 : FTexture(NULL, lumpnum), Pixels(0), Spans(0)
+{
+	if(mac)
+		InitMac(file);
+	else
+		Init(file);
+}
+
+void FWolfShapeTexture::Init(FileReader &file)
 {
 	// left, right, offsets...
 	WORD header[2];
@@ -143,28 +195,36 @@ FWolfShapeTexture::FWolfShapeTexture(int lumpnum, FileReader &file)
 	Height = 64;
 	LeftOffset = 32-header[0];
 	TopOffset = 64;
-	if(LumpRemapper::IsPSprite(lumpnum))
+	switch(LumpRemapper::IsPSprite(SourceLump))
 	{
-		// Magic numbers!!!
-		// Set the offset of this sprite such that it would match what it would
-		// be for on a Doom player sprite.
-		// Also scale it up 2.5 times, which is about what is needed to emulate
-		// the size of vanilla wolf within precision limits.
-		IsWeaponSprite = true;
-		TopOffset = 4;
-		LeftOffset -= 64;
-		xScale = 2*FRACUNIT/5;
-		yScale = 2*FRACUNIT/5;
+		default: break;
+		case LumpRemapper::PSPR_NORMAL:
+			// Magic numbers!!!
+			// Set the offset of this sprite such that it would match what it would
+			// be for on a Doom player sprite.
+			// Also scale it up 2.5 times, which is about what is needed to emulate
+			// the size of vanilla wolf within precision limits.
+			TopOffset = 4;
+			LeftOffset -= 64;
+			xScale = 2*FRACUNIT/5;
+			yScale = 2*FRACUNIT/5;
+			break;
+		case LumpRemapper::PSPR_BLAKE:
+			TopOffset = -36;
+			LeftOffset -= 114;
+			xScale = 5*FRACUNIT/7;
+			yScale = 5*FRACUNIT/7;
+			break;
 	}
-	else
-		IsWeaponSprite = false;
+
+	IsWeaponSprite = LumpRemapper::IsPSprite(SourceLump);
 
 	// Crop the height!
 	int minStart = 64;
 	int maxEnd = 0;
-	FMemLump lump = Wads.ReadLump (lumpnum);
+	FMemLump lump = Wads.ReadLump (SourceLump);
 	const BYTE* data = (const BYTE*)lump.GetMem();
-	for(int x = 0;x < Width;x++)
+	for(int x = 0;x < Width;++x)
 	{
 		const BYTE* column = data+ReadLittleShort(&data[4+x*2]);
 		int start, end;
@@ -193,6 +253,47 @@ FWolfShapeTexture::FWolfShapeTexture(int lumpnum, FileReader &file)
 
 	CalcBitSize ();
 	CheckSpriteSize();
+}
+
+void FWolfShapeTexture::InitMac(FileReader &file)
+{
+	// Width, which implies left offset.
+	WORD width;
+	file.Seek(0, SEEK_SET);
+	file.Read(&width, sizeof(width));
+	Width = BigShort(width);
+	Height = 128;
+	LeftOffset = Width>>1;
+	TopOffset = 128;
+	yScale = FRACUNIT*2;
+	xScale = FRACUNIT*2;
+
+	// Crop the height!
+	int minStart = 128;
+	int maxEnd = 0;
+	FMemLump lump = Wads.ReadLump (SourceLump);
+	const BYTE* data = (const BYTE*)lump.GetMem();
+	for(int x = 0;x < Width;++x)
+	{
+		const BYTE* column = data+ReadBigShort(&data[2+x*2]);
+		int start, end;
+		while((start = ReadBigShort(column)) != 0xFFFF)
+		{
+			start >>= 1;
+			end = ReadBigShort(column+2)>>1;
+			if(start < minStart)
+				minStart = start;
+			if(end > maxEnd)
+				maxEnd = end;
+			column += 6;
+		}
+	}
+
+	TopCrop = minStart;
+	Height = maxEnd-minStart;
+	TopOffset -= minStart;
+
+	CalcBitSize ();
 }
 
 //==========================================================================
@@ -257,7 +358,11 @@ const BYTE *FWolfShapeTexture::GetColumn (unsigned int column, const Span **span
 	}
 	if ((unsigned)column >= (unsigned)Width)
 	{
-		if (WidthMask + 1 == Width)
+		if (Width == 0)
+		{
+			column = 0;
+		}
+		else if (WidthMask + 1 == Width)
 		{
 			column &= WidthMask;
 		}
@@ -309,6 +414,30 @@ void FWolfShapeTexture::MakeTexture ()
 	}
 }
 
+void FMacShapeTexture::MakeTexture ()
+{
+	FMemLump lump = Wads.ReadLump (SourceLump);
+	const BYTE* data = (const BYTE*)lump.GetMem();
+
+	Pixels = new BYTE[Width*Height];
+	memset(Pixels, 0, Width*Height);
+
+	for(int x = 0;x < Width;x++)
+	{
+		BYTE* out = Pixels+(x*Height);
+		const BYTE* column = data+ReadBigShort(&data[2+x*2]);
+		int start, end;
+		while((start = ReadBigShort(column)) != 0xFFFF)
+		{
+			const BYTE* in = data+int16_t(ReadBigShort(column+4))+TopCrop;
+			start = (start>>1) - TopCrop;
+			end = (ReadBigShort(column+2)>>1) - TopCrop;
+			column += 6;
+			for(int y = start;y < end;y++)
+				out[y] = GPalette.Remap[in[y]];
+		}
+	}
+}
 //==========================================================================
 //
 //

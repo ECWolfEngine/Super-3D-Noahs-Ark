@@ -44,10 +44,6 @@
 extern HINSTANCE g_hInst;
 extern HWND ConWindow;
 extern bool queryiwad;
-const char *GetVersionString()
-{
-	return DOTVERSIONSTR;
-}
 
 static WadStuff *WadList;
 static int NumWads;
@@ -102,7 +98,7 @@ BOOL CALLBACK IWADBoxCallback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 			FString newlabel;
 
 			GetWindowText(hDlg, label, countof(label));
-			newlabel.Format(GAMESIG " %s: %s", GetVersionString(), label);
+			newlabel.Format("%s: %s", GetGameCaption(), label);
 			SetWindowText(hDlg, newlabel.GetChars());
 		}
 		// Populate the list with all the IWADs found
@@ -117,7 +113,7 @@ BOOL CALLBACK IWADBoxCallback(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 				if(filepart.IsEmpty())
 					filepart = WadList[i].Path[0];
 				else
-					filepart.Mid(1);
+					filepart = filepart.Mid(1);
 			}
 			else
 				filepart.Format("*.%s", WadList[i].Extension.GetChars());

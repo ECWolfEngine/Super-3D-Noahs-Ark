@@ -45,6 +45,8 @@
 #include "wl_agent.h"
 #include "wl_game.h"
 #include "wl_loadsave.h"
+#include "wl_net.h"
+#include "wl_state.h"
 #include "id_us.h"
 #include "m_random.h"
 
@@ -147,6 +149,7 @@ PointerIndexTable<ExpressionNode> AActor::damageExpressions;
 PointerIndexTable<AActor::DropList> AActor::dropItems;
 IMPLEMENT_POINTY_CLASS(Actor)
 	DECLARE_POINTER(inventory)
+	DECLARE_POINTER(target)
 END_POINTERS
 
 void AActor::AddInventory(AInventory *item)
@@ -173,6 +176,19 @@ void AActor::AddInventory(AInventory *item)
 	}
 }
 
+// This checks if this can see the specified actor. It replaces FL_VISABLE checks.
+bool AActor::CheckVisibility(const AActor *check, angle_t fov) const
+{
+	float angle = (float) atan2 ((float) (check->y - y), (float) (check->x - x));
+	if (angle<0)
+		angle = (float) (M_PI*2+angle);
+	angle_t iangle = 0-(angle_t)(angle*ANGLE_180/M_PI);
+	angle_t lowerAngle = MIN(iangle, this->angle);
+	angle_t upperAngle = MAX(iangle, this->angle);
+
+	return MIN(upperAngle - lowerAngle, lowerAngle - upperAngle) <= fov && CheckLine(check, this);
+}
+
 void AActor::ClearCounters()
 {
 	if(flags & FL_COUNTITEM)
@@ -182,6 +198,12 @@ void AActor::ClearCounters()
 	if(flags & FL_COUNTSECRET)
 		--gamestate.secrettotal;
 	flags &= ~(FL_COUNTITEM|FL_COUNTKILL|FL_COUNTSECRET);
+}
+
+void AActor::ClearInventory()
+{
+	while(inventory)
+		RemoveInventory(inventory);
 }
 
 void AActor::Destroy()
@@ -200,7 +222,17 @@ void AActor::Destroy()
 static FRandom pr_dropitem("DropItem");
 void AActor::Die()
 {
-	GivePoints(points);
+	if(target && target->player)
+		target->player->GivePoints(points);
+	else if(points)
+	{
+		// The targetting system may need some refinement, so if we don't have
+		// a usable target to give points to then we should give to player 1
+		// and possibly investigate.
+		players[0].GivePoints(points);
+		NetDPrintf("%s %d points with no target\n", __FUNCTION__, points);
+	}
+
 	if(flags & FL_COUNTKILL)
 		gamestate.killcount++;
 	flags &= ~FL_SHOOTABLE;
@@ -226,8 +258,7 @@ void AActor::Die()
 				{
 					if(flags & FL_DROPBASEDONTARGET)
 					{
-						AActor *target = players[0].mo;
-						AInventory *inv = target->FindInventory(cls->GetReplacement());
+						AInventory *inv = target ? target->FindInventory(cls->GetReplacement()) : NULL;
 						if(!inv || !bestDrop)
 							bestDrop = drop;
 
@@ -376,6 +407,22 @@ void AActor::Init()
 	}
 }
 
+// Approximate if a state sequence is running by checking if we are in a
+// contiguous sequence.
+bool AActor::InStateSequence(const Frame *basestate) const
+{
+	if(!basestate)
+		return false;
+
+	while(state != basestate)
+	{
+		if(basestate->next != basestate+1)
+			return false;
+		++basestate;
+	}
+	return true;
+}
+
 bool AActor::IsFast() const
 {
 	return (flags & FL_ALWAYSFAST) || gamestate.difficulty->FastMonsters;
@@ -408,8 +455,10 @@ void AActor::Serialize(FArchive &arc)
 	arc << flags
 		<< distance
 		<< x
-		<< y
-		<< velx
+		<< y;
+	if(GameSave::SaveProdVersion >= 0x001003FF && GameSave::SaveVersion >= 1507591295)
+		arc << z;
+	arc << velx
 		<< vely
 		<< angle
 		<< pitch
@@ -443,6 +492,8 @@ void AActor::Serialize(FArchive &arc)
 		<< player
 		<< inventory
 		<< soundZone;
+	if(GameSave::SaveProdVersion >= 0x001003FF && GameSave::SaveVersion >= 1459043051)
+		arc << target;
 	if(arc.IsLoading() && (GameSave::SaveProdVersion < 0x001002FF || GameSave::SaveVersion < 1382102747))
 	{
 		TObjPtr<AActorProxy> proxy;
@@ -457,6 +508,14 @@ void AActor::Serialize(FArchive &arc)
 		actors.Remove(this);
 
 	Super::Serialize(arc);
+}
+
+void AActor::SetIdle()
+{
+	if(const Frame *idle = FindState(NAME_Idle))
+		SetState(idle);
+	else
+		SetState(SpawnState);
 }
 
 void AActor::SetState(const Frame *state, bool norun)
@@ -490,6 +549,41 @@ void AActor::SetState(const Frame *state, bool norun)
 			}
 		}
 	}
+}
+
+void AActor::SpawnFog()
+{
+	if(const ClassDef *cls = ClassDef::FindClass("TeleportFog"))
+	{
+		AActor *fog = Spawn(cls, x, y, 0, SPAWN_AllowReplacement);
+		fog->angle = angle;
+		fog->target = this;
+	}
+}
+
+bool AActor::Teleport(fixed x, fixed y, angle_t angle, bool nofog)
+{
+	const MapSpot destination = map->GetSpot(x>>FRACBITS, y>>FRACBITS, 0);
+
+	// For non-players, only teleport if spot is clear.
+	if(!player)
+	{
+		if(!TrySpot(this, destination))
+			return false;
+	}
+
+	if(!nofog)
+		SpawnFog(); // Source fog
+
+	this->x = x;
+	this->y = y;
+	this->angle = angle;
+
+	EnterZone(destination->zone);
+
+	if(!nofog)
+		SpawnFog(); // Destination fog
+	return true;
 }
 
 void AActor::Tick()
@@ -590,9 +684,10 @@ AActor *AActor::Spawn(const ClassDef *type, fixed x, fixed y, fixed z, int flags
 	AActor *actor = type->CreateInstance();
 	actor->x = x;
 	actor->y = y;
+	actor->z = z;
 	actor->velx = 0;
 	actor->vely = 0;
-	actor->health = type->Meta.GetMetaInt(AMETA_DefaultHealth1 + gamestate.difficulty->SpawnFilter, actor->health);
+	actor->health = actor->SpawnHealth();
 
 	MapSpot spot = map->GetSpot(actor->tilex, actor->tiley, 0);
 	actor->EnterZone(spot->zone);
@@ -654,6 +749,11 @@ AActor *AActor::Spawn(const ClassDef *type, fixed x, fixed y, fixed z, int flags
 	return actor;
 }
 
+int32_t AActor::SpawnHealth() const
+{
+	return GetClass()->Meta.GetMetaInt(AMETA_DefaultHealth1 + gamestate.difficulty->SpawnFilter, health);
+}
+
 DEFINE_SYMBOL(Actor, angle)
 DEFINE_SYMBOL(Actor, health)
 
@@ -672,43 +772,46 @@ void StartTravel ()
 	// Set thinker priorities to TRAVEL so that they don't get wiped on level
 	// load.  We'll transfer them to a new actor.
 
-	AActor *player = players[0].mo;
+	for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
+	{
+		AActor *player = players[i].mo;
 
-	player->SetPriority(ThinkerList::TRAVEL);
+		player->SetPriority(ThinkerList::TRAVEL);
+	}
 }
 
 void FinishTravel ()
 {
 	gamestate.victoryflag = false;
 
-	ThinkerList::Iterator node = thinkerList->GetHead(ThinkerList::TRAVEL);
-	if(!node)
-		return;
-
-	do
+	ThinkerList::Iterator node = thinkerList.GetHead(ThinkerList::TRAVEL);
+	while(node)
 	{
 		AActor *actor = static_cast<AActor *>((Thinker*)node);
+		node.Next();
+
 		if(actor->IsKindOf(NATIVE_CLASS(PlayerPawn)))
 		{
-			APlayerPawn *player = static_cast<APlayerPawn *>(actor);
-			if(player->player == &players[0])
-			{
-				AActor *playertmp = players[0].mo;
-				player->x = playertmp->x;
-				player->y = playertmp->y;
-				player->angle = playertmp->angle;
-				player->EnterZone(playertmp->GetZone());
+			APlayerPawn *pawn = static_cast<APlayerPawn *>(actor);
+			player_t *player = pawn->player;
 
-				players[0].mo = player;
-				players[0].camera = player;
-				playertmp->Destroy();
+			// The player_t::mo has been replaced with a newly spawned player
+			// we want to transfer properties from the new player object onto
+			// the old one and then put the old one in place of the new one.
+			APlayerPawn *tmppawn = player->mo;
+			pawn->x = tmppawn->x;
+			pawn->y = tmppawn->y;
+			pawn->angle = tmppawn->angle;
+			pawn->EnterZone(tmppawn->GetZone());
 
-				// We must move the linked list iterator here since we'll
-				// transfer to the new linked list at the SetPriority call
-				player->SetPriority(ThinkerList::PLAYER);
-				continue;
-			}
+			player->mo = pawn;
+			player->camera = pawn;
+			tmppawn->Destroy();
+
+			// We must move the linked list iterator here since we'll
+			// transfer to the new linked list at the SetPriority call
+			pawn->SetPriority(ThinkerList::PLAYER);
+			continue;
 		}
 	}
-	while(node.Next());
 }

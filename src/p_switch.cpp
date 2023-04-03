@@ -93,7 +93,7 @@ protected:
 
 static bool P_StartButton (MapSpot spot, MapTile::Side side, FSwitchDef *Switch, fixed_t x, fixed_t y, bool useagain)
 {
-	ThinkerList::Iterator iter = thinkerList->GetHead(ThinkerList::WORLD);
+	ThinkerList::Iterator iter = thinkerList.GetHead(ThinkerList::WORLD);
 	while(iter)
 	{
 		if(iter->IsThinkerType<DActiveButton>())
@@ -289,7 +289,7 @@ bool P_ChangeSwitchTexture (MapSpot spot, MapTile::Side side, int useAgain, BYTE
 	{
 		//FName test = "switches/normbutn";
 		//Printf("Here %d %s %d %s\n", (int)test, test.GetChars(), (int)sound, sound.GetChars());
-		SD_PlaySound(FName(sound).GetChars());
+		PlaySoundLocMapSpot(FName(sound).GetChars(), spot);
 		//PlaySoundLocMapSpot(FName(sound), spot);
 	}
 	if (quest != NULL)

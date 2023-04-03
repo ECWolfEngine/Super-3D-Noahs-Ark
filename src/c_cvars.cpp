@@ -39,6 +39,8 @@
 #include "id_sd.h"
 #include "id_in.h"
 #include "id_us.h"
+#include "templates.h"
+#include "wl_agent.h"
 #include "wl_main.h"
 #include "wl_play.h"
 
@@ -54,6 +56,7 @@ bool unscaledweapons = true;
 
 bool alwaysrun;
 bool mouseenabled, mouseyaxisdisabled, joystickenabled;
+float localDesiredFOV = 90.0f;
 
 #if SDL_VERSION_ATLEAST(1,3,0)
 // Convert SDL1 keycode to SDL2 scancode
@@ -136,7 +139,7 @@ void FinalReadConfig()
 	sm = static_cast<SMMode> (config.GetSetting("MusicDevice")->GetInteger());
 	sds = static_cast<SDSMode> (config.GetSetting("DigitalSoundDevice")->GetInteger());
 
-	if ((sd == sdm_AdLib || sm == smm_AdLib) && !AdLibPresent
+	if ((sd == sdm_AdLib || sm != smm_Off) && !AdLibPresent
 			&& !SoundBlasterPresent)
 	{
 		sd = sdm_PC;
@@ -149,6 +152,7 @@ void FinalReadConfig()
 	SD_SetMusicMode(sm);
 	SD_SetSoundMode(sd);
 	SD_SetDigiDevice(sds);
+	N3DTempoEmulation = !!config.GetSetting("N3DTempoEmulation")->GetInteger();
 
 	AM_UpdateFlags();
 
@@ -165,6 +169,9 @@ void FinalReadConfig()
 
 void ReadConfig(void)
 {
+	int uniScreenWidth = 0, uniScreenHeight = 0;
+	SettingsData * sd = NULL;
+
 #if defined(_WIN32) || defined(__APPLE__)
 	config.CreateSetting("ForceGrabMouse", false);
 #else
@@ -180,6 +187,7 @@ void ReadConfig(void)
 	config.CreateSetting("SoundDevice", sdm_AdLib);
 	config.CreateSetting("MusicDevice", smm_AdLib);
 	config.CreateSetting("DigitalSoundDevice", sds_SoundBlaster);
+	config.CreateSetting("N3DTempoEmulation", false);
 	config.CreateSetting("AlwaysRun", 0);
 	config.CreateSetting("MouseYAxisDisabled", true);
 	config.CreateSetting("SoundVolume", MAX_VOLUME);
@@ -192,8 +200,11 @@ void ReadConfig(void)
 #endif
 	config.CreateSetting("Vid_Aspect", ASPECT_NONE);
 	config.CreateSetting("Vid_Vsync", false);
-	config.CreateSetting("ScreenWidth", screenWidth);
-	config.CreateSetting("ScreenHeight", screenHeight);
+	config.CreateSetting("FullScreenWidth", fullScreenWidth);
+	config.CreateSetting("FullScreenHeight", fullScreenHeight);
+	config.CreateSetting("WindowedScreenWidth", windowedScreenWidth);
+	config.CreateSetting("WindowedScreenHeight", windowedScreenHeight);
+	config.CreateSetting("DesiredFOV", localDesiredFOV);
 	config.CreateSetting("QuitOnEscape", quitonescape);
 	config.CreateSetting("MoveBob", FRACUNIT);
 	config.CreateSetting("Gamma", 1.0f);
@@ -208,21 +219,25 @@ void ReadConfig(void)
 
 	char joySettingName[50] = {0};
 	char keySettingName[50] = {0};
+	char keySettingBugName[50] = {0};
 	char mseSettingName[50] = {0};
 	forcegrabmouse = config.GetSetting("ForceGrabMouse")->GetInteger() != 0;
 	mouseenabled = config.GetSetting("MouseEnabled")->GetInteger() != 0;
 	joystickenabled = config.GetSetting("JoystickEnabled")->GetInteger() != 0;
 	for(unsigned int i = 0;controlScheme[i].button != bt_nobutton;i++)
 	{
-		sprintf(joySettingName, "Joystick_%s", controlScheme[i].name);
-		sprintf(keySettingName, "Keybaord_%s", controlScheme[i].name);
-		sprintf(mseSettingName, "Mouse_%s", controlScheme[i].name);
+		mysnprintf(joySettingName, 50, "Joystick_%s", controlScheme[i].name);
+		mysnprintf(keySettingBugName, 50, "Keybaord_%s", controlScheme[i].name);
+		mysnprintf(keySettingName, 50, "Keyboard_%s", controlScheme[i].name);
+		mysnprintf(mseSettingName, 50, "Mouse_%s", controlScheme[i].name);
 		for(unsigned int j = 0;j < 50;j++)
 		{
 			if(joySettingName[j] == ' ')
 				joySettingName[j] = '_';
 			if(keySettingName[j] == ' ')
 				keySettingName[j] = '_';
+			if(keySettingBugName[j] == ' ')
+				keySettingBugName[j] = '_';
 			if(mseSettingName[j] == ' ')
 				mseSettingName[j] = '_';
 		}
@@ -230,7 +245,13 @@ void ReadConfig(void)
 		config.CreateSetting(keySettingName, SDL2Backconvert(controlScheme[i].keyboard));
 		config.CreateSetting(mseSettingName, controlScheme[i].mouse);
 		controlScheme[i].joystick = config.GetSetting(joySettingName)->GetInteger();
-		controlScheme[i].keyboard = SDL2Convert(config.GetSetting(keySettingName)->GetInteger());
+		if (config.GetSetting(keySettingBugName) != NULL) // fix a typo from older versions
+		{
+			controlScheme[i].keyboard = SDL2Convert(config.GetSetting(keySettingBugName)->GetInteger());
+			config.DeleteSetting(keySettingBugName);
+		}
+		else
+			controlScheme[i].keyboard = SDL2Convert(config.GetSetting(keySettingName)->GetInteger());
 		controlScheme[i].mouse = config.GetSetting(mseSettingName)->GetInteger();
 	}
 	viewsize = config.GetSetting("ViewSize")->GetInteger();
@@ -241,14 +262,27 @@ void ReadConfig(void)
 	mouseyaxisdisabled = config.GetSetting("MouseYAxisDisabled")->GetInteger() != 0;
 	alwaysrun = config.GetSetting("AlwaysRun")->GetInteger() != 0;
 	AdlibVolume = config.GetSetting("SoundVolume")->GetInteger();
-	SD_UpdatePCSpeakerVolume();
 	MusicVolume = config.GetSetting("MusicVolume")->GetInteger();
 	SoundVolume = config.GetSetting("DigitizedVolume")->GetInteger();
 	vid_fullscreen = config.GetSetting("Vid_FullScreen")->GetInteger() != 0;
 	vid_aspect = static_cast<Aspect>(config.GetSetting("Vid_Aspect")->GetInteger());
 	vid_vsync = config.GetSetting("Vid_Vsync")->GetInteger() != 0;
-	screenWidth = config.GetSetting("ScreenWidth")->GetInteger();
-	screenHeight = config.GetSetting("ScreenHeight")->GetInteger();
+	fullScreenWidth = config.GetSetting("FullScreenWidth")->GetInteger();
+	fullScreenHeight = config.GetSetting("FullScreenHeight")->GetInteger();
+	windowedScreenWidth = config.GetSetting("WindowedScreenWidth")->GetInteger();
+	windowedScreenHeight = config.GetSetting("WindowedScreenHeight")->GetInteger();
+	if ((sd = config.GetSetting("ScreenWidth")) != NULL)
+	{
+		uniScreenWidth = sd->GetInteger();
+		config.DeleteSetting("ScreenWidth");
+	}
+
+	if ((sd = config.GetSetting("ScreenHeight")) != NULL)
+	{
+		uniScreenHeight = sd->GetInteger();
+		config.DeleteSetting("ScreenHeight");
+	}
+	localDesiredFOV = clamp<float>(static_cast<float>(config.GetSetting("DesiredFOV")->GetFloat()), 45.0f, 180.0f);
 	quitonescape = config.GetSetting("QuitOnEscape")->GetInteger() != 0;
 	movebob = config.GetSetting("MoveBob")->GetInteger();
 	screenGamma = static_cast<float>(config.GetSetting("Gamma")->GetFloat());
@@ -267,10 +301,10 @@ void ReadConfig(void)
 	char hsGraphic[50];
 	for(unsigned int i = 0;i < MaxScores;i++)
 	{
-		sprintf(hsName, "HighScore%u_Name", i);
-		sprintf(hsScore, "HighScore%u_Score", i);
-		sprintf(hsCompleted, "HighScore%u_Completed", i);
-		sprintf(hsGraphic, "HighScore%u_Graphic", i);
+		mysnprintf(hsName, 50, "HighScore%u_Name", i);
+		mysnprintf(hsScore, 50, "HighScore%u_Score", i);
+		mysnprintf(hsCompleted, 50, "HighScore%u_Completed", i);
+		mysnprintf(hsGraphic, 50, "HighScore%u_Graphic", i);
 
 		config.CreateSetting(hsName, Scores[i].name);
 		config.CreateSetting(hsScore, Scores[i].score);
@@ -302,6 +336,36 @@ void ReadConfig(void)
 
 	if(viewsize<4) viewsize=4;
 	else if(viewsize>21) viewsize=21;
+
+	// Carry over the unified screenWidth/screenHeight from previous versions
+	// Overwrite the full*/windowed* variables, because they're (most likely) defaulted anyways
+	if(uniScreenWidth != 0)
+	{
+		fullScreenWidth = uniScreenWidth;
+		windowedScreenWidth = uniScreenWidth;
+	}
+
+	if(uniScreenHeight != 0)
+	{
+		fullScreenHeight = uniScreenHeight;
+		windowedScreenHeight = uniScreenHeight;
+	}
+
+	// Set screenHeight, screenWidth
+	if(vid_fullscreen)
+	{
+		screenHeight = fullScreenHeight;
+		screenWidth = fullScreenWidth;
+	}
+	else
+	{
+		screenHeight = windowedScreenHeight;
+		screenWidth = windowedScreenWidth;
+	}
+
+	// Propogate localDesiredFOV to players
+	for(unsigned int i = 0;i < MAXPLAYERS;++i)
+		players[i].SetFOV(localDesiredFOV);
 }
 
 /*
@@ -325,9 +389,9 @@ void WriteConfig(void)
 	config.GetSetting("JoystickEnabled")->SetValue(joystickenabled);
 	for(unsigned int i = 0;controlScheme[i].button != bt_nobutton;i++)
 	{
-		sprintf(joySettingName, "Joystick_%s", controlScheme[i].name);
-		sprintf(keySettingName, "Keybaord_%s", controlScheme[i].name);
-		sprintf(mseSettingName, "Mouse_%s", controlScheme[i].name);
+		mysnprintf(joySettingName, 50, "Joystick_%s", controlScheme[i].name);
+		mysnprintf(keySettingName, 50, "Keyboard_%s", controlScheme[i].name);
+		mysnprintf(mseSettingName, 50, "Mouse_%s", controlScheme[i].name);
 		for(unsigned int j = 0;j < 50;j++)
 		{
 			if(joySettingName[j] == ' ')
@@ -351,14 +415,18 @@ void WriteConfig(void)
 	config.GetSetting("SoundDevice")->SetValue(SoundMode);
 	config.GetSetting("MusicDevice")->SetValue(MusicMode);
 	config.GetSetting("DigitalSoundDevice")->SetValue(DigiMode);
+	config.GetSetting("N3DTempoEmulation")->SetValue(N3DTempoEmulation);
 	config.GetSetting("SoundVolume")->SetValue(AdlibVolume);
 	config.GetSetting("MusicVolume")->SetValue(MusicVolume);
 	config.GetSetting("DigitizedVolume")->SetValue(SoundVolume);
 	config.GetSetting("Vid_FullScreen")->SetValue(vid_fullscreen);
 	config.GetSetting("Vid_Aspect")->SetValue(vid_aspect);
 	config.GetSetting("Vid_Vsync")->SetValue(vid_vsync);
-	config.GetSetting("ScreenWidth")->SetValue(screenWidth);
-	config.GetSetting("ScreenHeight")->SetValue(screenHeight);
+	config.GetSetting("FullScreenWidth")->SetValue(fullScreenWidth);
+	config.GetSetting("FullScreenHeight")->SetValue(fullScreenHeight);
+	config.GetSetting("WindowedScreenWidth")->SetValue(windowedScreenWidth);
+	config.GetSetting("WindowedScreenHeight")->SetValue(windowedScreenHeight);
+	config.GetSetting("DesiredFOV")->SetValue(localDesiredFOV);
 	config.GetSetting("QuitOnEscape")->SetValue(quitonescape);
 	config.GetSetting("MoveBob")->SetValue(movebob);
 	config.GetSetting("Gamma")->SetValue(screenGamma);
@@ -377,10 +445,10 @@ void WriteConfig(void)
 	char hsGraphic[50];
 	for(unsigned int i = 0;i < MaxScores;i++)
 	{
-		sprintf(hsName, "HighScore%u_Name", i);
-		sprintf(hsScore, "HighScore%u_Score", i);
-		sprintf(hsCompleted, "HighScore%u_Completed", i);
-		sprintf(hsGraphic, "HighScore%u_Graphic", i);
+		mysnprintf(hsName, 50, "HighScore%u_Name", i);
+		mysnprintf(hsScore, 50, "HighScore%u_Score", i);
+		mysnprintf(hsCompleted, 50, "HighScore%u_Completed", i);
+		mysnprintf(hsGraphic, 50, "HighScore%u_Graphic", i);
 
 		config.GetSetting(hsName)->SetValue(Scores[i].name);
 		config.GetSetting(hsScore)->SetValue(Scores[i].score);

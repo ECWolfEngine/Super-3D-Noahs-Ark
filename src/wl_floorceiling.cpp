@@ -10,7 +10,7 @@
 
 #include <climits>
 
-extern fixed viewshift;
+extern int viewshift;
 extern fixed viewz;
 
 static void R_DrawPlane(byte *vbuf, unsigned vbufPitch, int min_wallheight, int halfheight, fixed planeheight)
@@ -19,14 +19,18 @@ static void R_DrawPlane(byte *vbuf, unsigned vbufPitch, int min_wallheight, int 
 	fixed tex_step;                            // global step per one screen pixel
 	fixed gu, gv, du, dv;                      // global texture coordinates
 	const byte *tex = NULL;
-	int texwidth, texheight;
-	fixed texxscale, texyscale;
+	int texwidth = 0, texheight = 0;
+	fixed texxscale = 0, texyscale = 0;
 	FTextureID lasttex;
 	byte *tex_offset;
 	bool useOptimized = false;
+	bool isMasked = false;
 
-	const fixed heightFactor = abs(planeheight/32);
-	int y0 = (((min_wallheight >> 3)*heightFactor)>>FRACBITS) - abs(viewshift);
+	if(planeheight == 0) // Eye level
+		return;
+
+	const fixed heightFactor = abs(planeheight)>>8;
+	int y0 = ((min_wallheight*heightFactor)>>FRACBITS) - abs(viewshift);
 	if(y0 > halfheight)
 		return; // view obscured by walls
 	if(y0 <= 0) y0 = 1; // don't let division by zero
@@ -51,6 +55,12 @@ static void R_DrawPlane(byte *vbuf, unsigned vbufPitch, int min_wallheight, int 
 		tex_offsetPitch = -viewwidth-vbufPitch;
 	}
 
+	// Break viewx/viewy apart so we can use the fractional part for texel selection without overflowing.
+	const int viewxTile = viewx>>FRACBITS;
+	const int viewxFrac = (viewx&(FRACUNIT-1))<<8; // 8.24
+	const int viewyTile = viewy>>FRACBITS;
+	const int viewyFrac = (viewy&(FRACUNIT-1))<<8; // 8.24
+
 	unsigned int oldmapx = INT_MAX, oldmapy = INT_MAX;
 	const byte* curshades = NormalLight.Maps;
 	// draw horizontal lines
@@ -62,9 +72,10 @@ static void R_DrawPlane(byte *vbuf, unsigned vbufPitch, int min_wallheight, int 
 			continue;
 		}
 
-		dist = (planenumerator / (y + 1));
-		gu =  viewx + FixedMul(dist, viewcos);
-		gv = -viewy + FixedMul(dist, viewsin);
+		// Shift in some extra bits so that we don't get spectacular round off.
+		dist = (planenumerator / (y + 1))<<8;
+		gu =  viewxFrac + FixedMul(dist, viewcos);
+		gv = -viewyFrac + FixedMul(dist, viewsin);
 		tex_step = dist / scale;
 		du =  FixedMul(tex_step, viewsin);
 		dv = -FixedMul(tex_step, viewcos);
@@ -78,10 +89,10 @@ static void R_DrawPlane(byte *vbuf, unsigned vbufPitch, int min_wallheight, int 
 
 		for(unsigned int x = 0;x < (unsigned)viewwidth; ++x, ++tex_offset)
 		{
-			if(((wallheight[x] >> 3)*heightFactor)>>FRACBITS <= y)
+			if(((wallheight[x]*heightFactor)>>FRACBITS) <= y)
 			{
-				unsigned int curx = (gu >> TILESHIFT);
-				unsigned int cury = (-(gv >> TILESHIFT) - 1);
+				unsigned int curx = viewxTile + (gu >> (TILESHIFT+8));
+				unsigned int cury = viewyTile + (-(gv >> (TILESHIFT+8)) - 1);
 
 				if(curx != oldmapx || cury != oldmapy)
 				{
@@ -103,6 +114,7 @@ static void R_DrawPlane(byte *vbuf, unsigned vbufPitch, int min_wallheight, int 
 							texyscale = -texture->yScale>>10;
 
 							useOptimized = texwidth == 64 && texheight == 64 && texxscale == FRACUNIT>>10 && texyscale == -FRACUNIT>>10;
+							isMasked = texture->bMasked;
 						}
 					}
 					else
@@ -111,18 +123,27 @@ static void R_DrawPlane(byte *vbuf, unsigned vbufPitch, int min_wallheight, int 
 
 				if(tex)
 				{
+					unsigned texoffs;
 					if(useOptimized)
 					{
-						const int u = (gu>>10) & 63;
-						const int v = (-gv>>10) & 63;
-						const unsigned texoffs = (u * 64) + v;
-						*tex_offset = curshades[tex[texoffs]];
+						const int u = (gu>>18) & 63;
+						const int v = (-gv>>18) & 63;
+						texoffs = (u * 64) + v;
 					}
 					else
 					{
-						const int u = (FixedMul(gu-512, texxscale)) & (texwidth-1);
-						const int v = (FixedMul(gv+512, texyscale)) & (texheight-1);
-						const unsigned texoffs = (u * texheight) + v;
+						const int u = (FixedMul((viewxTile<<16)+(gu>>8)-512, texxscale)) & (texwidth-1);
+						const int v = (FixedMul((viewyTile<<16)-(gv>>8)+512, texyscale)) & (texheight-1);
+						texoffs = (u * texheight) + v;
+					}
+
+					if(isMasked)
+					{
+						if(const byte c = tex[texoffs])
+							*tex_offset = curshades[c];
+					}
+					else
+					{
 						*tex_offset = curshades[tex[texoffs]];
 					}
 				}
@@ -140,6 +161,6 @@ void DrawFloorAndCeiling(byte *vbuf, unsigned vbufPitch, int min_wallheight)
 {
 	const int halfheight = (viewheight >> 1) - viewshift;
 
-	R_DrawPlane(vbuf, vbufPitch, min_wallheight, halfheight, viewz-(64<<FRACBITS));
 	R_DrawPlane(vbuf, vbufPitch, min_wallheight, halfheight, viewz);
+	R_DrawPlane(vbuf, vbufPitch, min_wallheight, halfheight, viewz+(map->GetPlane(0).depth<<FRACBITS));
 }

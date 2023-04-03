@@ -42,14 +42,42 @@
 #include "lnspec.h"
 #include "actor.h"
 #include "thingdef/thingdef.h"
+#include "wl_act.h"
 #include "wl_agent.h"
 #include "wl_game.h"
+#include "wl_net.h"
+#include "wl_play.h"
 #include "r_sprites.h"
 #include "resourcefiles/resourcefile.h"
 #include "wl_loadsave.h"
 #include "doomerrors.h"
 #include "m_random.h"
 #include "g_mapinfo.h"
+
+const FName SpecialThingNames[SMT_NumThings] = {
+	"$Player1Start",
+	"$Player2Start",
+	"$Player3Start",
+	"$Player4Start",
+	"$Player5Start",
+	"$Player6Start",
+	"$Player7Start",
+	"$Player8Start",
+	"$Player9Start",
+	"$Player10Start",
+	"$Player11Start",
+	"$DeathmatchStart"
+};
+
+ESpecialThings SpecialThingNamesLookup(FName name)
+{
+	for(unsigned int i = 0;i < SMT_NumThings;++i)
+	{
+		if(SpecialThingNames[i] == name)
+			return static_cast<ESpecialThings>(i);
+	}
+	return SMT_NumThings;
+}
 
 GameMap::GameMap(const FString &map) : map(map), valid(false), isUWMF(false),
 	file(NULL), zoneTraversed(NULL), zoneLinks(NULL)
@@ -134,23 +162,33 @@ GameMap::GameMap(const FString &map) : map(map), valid(false), isUWMF(false),
 	}
 	else
 	{
-		if(strcmp(Wads.GetLumpFullName(markerLump+1), "PLANES") == 0)
+		const char* nextLumpName = Wads.GetLumpFullName(markerLump+1);
+		if(nextLumpName == NULL || strcmp(nextLumpName, "TEXTMAP") != 0)
 		{
 			numLumps = 1;
 			isUWMF = false;
 			valid = true;
-			lumps[0] = Wads.ReopenLumpNum(markerLump+1);
+			if(nextLumpName != NULL && strcmp(nextLumpName, "PLANES") == 0)
+			{
+				// DOS (WDC) format binary map
+				lumps[0] = Wads.ReopenLumpNum(markerLump+1);
+			}
+			else
+			{
+				// Must be a Mac format map
+				lumps[0] = Wads.ReopenLumpNum(markerLump);
+				if(lumps[0]->GetLength() <= 0)
+				{
+					FString error;
+					error.Format("Invalid map format for %s!", map.GetChars());
+					throw CRecoverableError(error);
+				}
+			}
+			
 		}
 		else
 		{
 			// Expect UWMF formatted map.
-			if(strcmp(Wads.GetLumpFullName(markerLump+1), "TEXTMAP") != 0)
-			{
-				FString error;
-				error.Format("Invalid map format for %s!", map.GetChars());
-				throw CRecoverableError(error);
-			}
-
 			isUWMF = true;
 			lumps[0] = Wads.ReopenLumpNum(markerLump+1);
 
@@ -175,9 +213,9 @@ GameMap::GameMap(const FString &map) : map(map), valid(false), isUWMF(false),
 
 GameMap::~GameMap()
 {
+	delete lumps[0];
 	if(isWad)
 		delete file;
-	delete lumps[0];
 
 	for(unsigned int i = 0;i < planes.Size();++i)
 		delete[] planes[i].map;
@@ -209,8 +247,8 @@ void GameMap::ClearVisibility()
 		for(unsigned int p = 0;p < planes.Size();++p)
 			planes[p].map[i].visible = false;
 	}
-	if(players[0].camera)
-		GetSpot(players[0].camera->tilex, players[0].camera->tiley, 0)->visible = true;
+	if(players[ConsolePlayer].camera)
+		GetSpot(players[ConsolePlayer].camera->tilex, players[ConsolePlayer].camera->tiley, 0)->visible = true;
 }
 
 bool GameMap::CheckMapExists(const FString &map)
@@ -305,6 +343,60 @@ void GameMap::GetHitlist(BYTE* hitlist) const
 			}
 		}
 	}
+}
+
+const GameMap::PlayerSpawn *GameMap::GetPlayerSpawn(int player) const
+{
+	if(Net::InitVars.gameMode == Net::GM_Battle)
+	{
+		// Spawn farthest
+		unsigned int best = 0;
+		fixed distance = 0;
+
+		for(unsigned int i = 0;i < deathmatchStarts.Size();++i)
+		{
+			PlayerSpawn &spot = deathmatchStarts[i];
+
+			fixed closest = INT_MAX;
+			for(unsigned int p = 0;p < Net::InitVars.numPlayers;++p)
+			{
+				if(!players[p].mo && players[p].health <= 0)
+					continue;
+
+				fixed player_distance = P_AproxDistance(players[p].mo->x - spot.x, players[p].mo->y - spot.y);
+				if(player_distance < closest)
+					closest = player_distance;
+			}
+
+			if(closest > distance)
+			{
+				best = i;
+				distance = closest;
+			}
+		}
+
+		return &deathmatchStarts[best];
+	}
+
+	if(const PlayerSpawn *spawn = playerStarts.CheckKey(player))
+		return spawn;
+
+	// No direct spawn, so overlap with another player, but if possible divide
+	// amongst any additional spawn points available
+	unsigned int alt = player % playerStarts.CountUsed();
+	const PlayerSpawn *best = NULL;
+	for(unsigned int i = 0;i < MAXPLAYERS;++i)
+	{
+		if(const PlayerSpawn *spawn = playerStarts.CheckKey(i))
+		{
+			best = spawn;
+			if(alt == 0)
+				break;
+			--alt;
+		}
+	}
+
+	return best;
 }
 
 // Looks up the MapSpot by tag number.  If spot is NULL then the first spot
@@ -483,20 +575,34 @@ void GameMap::SetupLinks()
 }
 
 extern FRandom pr_spawnmobj;
-void GameMap::SpawnThings() const
+void GameMap::SpawnThings()
 {
 #if 0
 	// Debug code - Show the number of things spawned at map start.
 	printf("Spawning %d things\n", things.Size());
 #endif
+
+	playerStarts.Clear();
+	deathmatchStarts.Clear();
+
+	// Since vanilla didn't have deathmatch we can collect monster spawn points as a fallback.
+	TArray<PlayerSpawn> deathmatchFallbackStarts;
+
 	for(unsigned int i = 0;i < things.Size();++i)
 	{
 		Thing &thing = things[i];
 		if(!thing.skill[gamestate.difficulty->SpawnFilter])
 			continue;
 
-		if(thing.type == 1)
-			SpawnPlayer(thing.x>>FRACBITS, thing.y>>FRACBITS, thing.angle);
+		ESpecialThings st = SpecialThingNamesLookup(thing.type);
+		if(st != SMT_NumThings)
+		{
+			PlayerSpawn spawn = {thing.x, thing.y, thing.angle};
+			if(st >= SMT_Player1Start && st <= SMT_Player11Start)
+				playerStarts.Insert(st - SMT_Player1Start, spawn);
+			else
+				deathmatchStarts.Push(spawn);
+		}
 		else
 		{
 			static const ClassDef *unknownClass = ClassDef::FindClass("Unknown");
@@ -505,10 +611,17 @@ void GameMap::SpawnThings() const
 			if(cls == NULL)
 			{
 				cls = unknownClass;
-				printf("Unknown thing %d @ (%d, %d)\n", thing.type, thing.x>>FRACBITS, thing.y>>FRACBITS);
+				printf("Unknown thing %s @ (%d, %d)\n", thing.type.GetChars(), thing.x>>FRACBITS, thing.y>>FRACBITS);
 			}
 
-			AActor *actor = AActor::Spawn(cls, thing.x, thing.y, 0, SPAWN_AllowReplacement|(thing.patrol ? SPAWN_Patrol : 0));
+			if(Net::NoMonsters() && (cls->GetDefault()->flags & FL_ISMONSTER))
+			{
+				PlayerSpawn spawn = {thing.x, thing.y, thing.angle};
+				deathmatchFallbackStarts.Push(spawn);
+				continue;
+			}
+
+			AActor *actor = AActor::Spawn(cls, thing.x, thing.y, thing.z, SPAWN_AllowReplacement|(thing.patrol ? SPAWN_Patrol : 0));
 			// This forumla helps us to avoid errors in roundoffs.
 			actor->angle = (thing.angle/45)*ANGLE_45 + (thing.angle%45)*ANGLE_1;
 			actor->dir = nodir;
@@ -516,15 +629,41 @@ void GameMap::SpawnThings() const
 				actor->flags |= FL_AMBUSH;
 			if(thing.patrol)
 				actor->dir = dirtype(actor->angle/ANGLE_45);
+			if(thing.holo)
+				actor->flags &= ~(FL_SOLID);
+
+			actor->LevelSpawned();
 
 			// Check for valid frames
 			if(!actor->state || !R_CheckSpriteValid(actor->sprite))
 			{
 				actor->Destroy();
-				actor = AActor::Spawn(unknownClass, thing.x, thing.y, 0, SPAWN_AllowReplacement);
+				actor = AActor::Spawn(unknownClass, thing.x, thing.y, thing.z, SPAWN_AllowReplacement);
 
 				printf("%s at (%d, %d) has no frames\n", cls->GetName().GetChars(), thing.x>>FRACBITS, thing.y>>FRACBITS);
 			}
+		}
+	}
+
+	// If map doesn't have deathmatch starts and we require them find a fallback
+	if(deathmatchStarts.Size() == 0 && Net::InitVars.gameMode == Net::GM_Battle)
+	{
+		if(deathmatchFallbackStarts.Size() != 0)
+		{
+			deathmatchStarts = deathmatchFallbackStarts;
+			if(PlayerSpawn *spawn = playerStarts.CheckKey(0))
+			{
+				// Player 1 start should be a good candidate. Generally co-op
+				// starts are near to each other so no need to add the others
+				deathmatchStarts.Push(*spawn);
+			}
+		}
+		else
+		{
+			// If the map has no monsters and no deathmatch starts, use the co-op starts
+			TMap<unsigned int, PlayerSpawn>::Pair *pair;
+			for(TMap<unsigned int, PlayerSpawn>::Iterator iter(playerStarts);iter.NextPair(pair);)
+				deathmatchStarts.Push(pair->Value);
 		}
 	}
 }
@@ -604,6 +743,12 @@ FArchive &operator<< (FArchive &arc, GameMap *&gm)
 		<< gm->header.width
 		<< gm->header.height
 		<< gm->header.tileSize;
+
+	if(GameSave::SaveVersion >= 1599444347)
+	{
+		arc << gm->header.sky
+		    << gm->header.skyHorizonOffset;
+	}
 
 	// zoneLinks
 	if(GameSave::SaveVersion >= 1383348286)

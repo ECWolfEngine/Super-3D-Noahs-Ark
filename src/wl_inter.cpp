@@ -2,15 +2,18 @@
 
 #include "wl_def.h"
 #include "wl_menu.h"
+#include "wl_play.h"
 #include "id_ca.h"
 #include "id_sd.h"
 #include "id_vl.h"
 #include "id_vh.h"
 #include "id_us.h"
 #include "language.h"
+#include "v_video.h"
 #include "wl_agent.h"
 #include "wl_game.h"
 #include "wl_inter.h"
+#include "wl_net.h"
 #include "wl_text.h"
 #include "g_mapinfo.h"
 #include "colormatcher.h"
@@ -186,7 +189,7 @@ static void InterWriteCounter(int start, int end, int step, unsigned int x, unsi
 		}
 		else if(!((i++) % sndfreq))
 			SD_PlaySound (sound);
-		if(!usedoublebuffering || !(start & 1)) VW_UpdateScreen ();
+		if(!(start & 1)) VW_UpdateScreen ();
 		do
 		{
 			BJ_Breathe ();
@@ -261,6 +264,24 @@ static void InterAddBonus(unsigned int bonus, bool count=false)
 	VW_UpdateScreen ();
 }
 
+// Divy up bonus points to all players
+static void InterGiveBonus(unsigned int bonus)
+{
+	unsigned int commonBonus = bonus/Net::InitVars.numPlayers;
+	unsigned int extraBonus = bonus%Net::InitVars.numPlayers;
+
+	// We'll give the remainder points to the lowest scoring player because why not?
+	player_t *extraRecipient = players;
+	for(unsigned int i = 1;i < Net::InitVars.numPlayers;++i)
+	{
+		if(players[i].score < extraRecipient->score)
+			extraRecipient = &players[i];
+	}
+
+	for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
+		players[i].GivePoints(commonBonus + (&players[i] == extraRecipient ? extraBonus : 0));
+}
+
 /**
  * Displays a percentage ratio, counting up to the ratio.
  * Returns true if the intermission has been acked and should be skipped.
@@ -307,7 +328,7 @@ static void InterCountRatio(int ratio, unsigned int x, unsigned int y)
 static void InterWaitForAck()
 {
 	InterState.acked = false;
-	IN_StartAck ();
+	IN_StartAck (ACK_Any);
 	while (!IN_CheckAck ())
 		BJ_Breathe ();
 	IN_ClearKeysDown();
@@ -322,8 +343,10 @@ static void InterDrawNormalTop()
 			completedString = language[levelInfo->CompletionString.Mid(1)];
 		else
 			completedString = levelInfo->CompletionString;
-		completedString.Format(completedString, levelInfo->FloorNumber.GetChars());
-		Write (14, 2, completedString);
+
+		FString formattedString;
+		formattedString.Format(completedString, levelInfo->FloorNumber.GetChars());
+		Write (14, 2, formattedString);
 	}
 	else
 	{
@@ -384,7 +407,7 @@ static void InterDoBonus()
 	VW_UpdateScreen ();
 	VW_FadeIn ();
 
-	GivePoints (levelInfo->LevelBonus);
+	InterGiveBonus (levelInfo->LevelBonus);
 }
 
 static void InterDoNormal()
@@ -435,7 +458,7 @@ static void InterDoNormal()
 	InterCountRatio(InterState.sr, 296, 112+16);
 	InterCountRatio(InterState.tr, 296, 112+32);
 
-	GivePoints (InterState.bonus);
+	InterGiveBonus (InterState.bonus);
 }
 
 static void InterDoGraphical()
@@ -498,7 +521,7 @@ static void InterDoGraphical()
 	InterCountRatio(InterState.tr, 232, 104+16);
 	InterCountRatio(InterState.sr, 232, 104+32);
 
-	GivePoints (InterState.bonus);
+	InterGiveBonus (InterState.bonus);
 
 	if(InterState.kr == 100 && InterState.sr == 100 && InterState.tr == 100)
 	{
@@ -584,7 +607,7 @@ void LevelCompleted (void)
 	StartCPMusic (gameinfo.IntermissionMusic);
 
 	IN_ClearKeysDown ();
-	IN_StartAck ();
+	IN_StartAck (ACK_Any);
 
 	BJ_Breathe(true);
 
@@ -663,7 +686,7 @@ void Victory (bool fromIntermission)
 	{
 		static const unsigned int RATIOX = 22, RATIOY = 14, TIMEX = 14, TIMEY = 8;
 		int min, sec;
-		char tempstr[8];
+		char tempstr[13];
 
 		VWB_DrawGraphic (TexMan("L_BJWINS"), 8, 4);
 
@@ -705,7 +728,7 @@ void Victory (bool fromIntermission)
 	VW_UpdateScreen ();
 	VW_FadeIn ();
 
-	IN_Ack ();
+	IN_Ack (ACK_Any);
 
 	EndText (levelInfo->Cluster);
 
@@ -783,7 +806,7 @@ void PreloadGraphics (bool showPsych)
 	if(showPsych)
 	{
 		PreloadUpdate (10, 10);
-		IN_UserInput (70);
+		IN_UserInput (70, ACK_Any);
 		VW_FadeOut ();
 
 		DrawPlayScreen ();
@@ -889,6 +912,9 @@ void DrawHighScores (void)
 
 void CheckHighScore (int32_t score, const LevelInfo *levelInfo)
 {
+	if (!gameinfo.TrackHighScores || Net::InitVars.mode != Net::MODE_SinglePlayer)
+		return;
+
 	word i, j;
 	int n;
 	HighScore myscore;
@@ -907,7 +933,7 @@ void CheckHighScore (int32_t score, const LevelInfo *levelInfo)
 	for (i = 0, n = -1; i < MaxScores; i++)
 	{
 		if ((myscore.score > Scores[i].score)
-			|| ((myscore.score == Scores[i].score) && (myscore.completed > Scores[i].completed)))
+			|| ((myscore.score == Scores[i].score) && (myscore.completed.Compare(Scores[i].completed) > 0)))
 		{
 			for (j = MaxScores; --j > i;)
 				Scores[j] = Scores[j - 1];
@@ -936,7 +962,7 @@ void CheckHighScore (int32_t score, const LevelInfo *levelInfo)
 	else
 	{
 		IN_ClearKeysDown ();
-		IN_UserInput (500);
+		IN_UserInput (500, ACK_Local);
 	}
 
 	VW_FadeOut();

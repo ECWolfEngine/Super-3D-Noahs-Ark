@@ -40,30 +40,35 @@
 // For IWad Pickers so not in namespace
 struct WadStuff
 {
-	WadStuff() : Type(0) {}
+	WadStuff() : Type(-1), Hidden(false) {}
 
 	TArray<FString> Path;
 	FString Extension;
 	FString Name;
 	int Type;
+	bool Hidden;
 };
 
 namespace IWad
 {
 	enum Flags
 	{
-		REGISTERED = 1,
-		HELPHACK = 2
+		REGISTERED = 1, // Enables not-shareware warning
+		HELPHACK = 2,   // Fixes helpart art assets
+		PREVIEW = 4,    // Only show in picker if user opts in
+		RESOURCE = 8    // Used as a component of another option
 	};
 
 	struct IWadData
 	{
 		FString Name;
+		FString Autoname;
 		FString Mapinfo;
 		TArray<FString> Ident;
-		FString Required;
+		TArray<FString> Required;
 		FName Game;
 		unsigned int Flags;
+		bool LevelSet;
 	};
 
 	bool CheckGameFilter(FName filter);

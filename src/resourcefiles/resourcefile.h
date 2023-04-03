@@ -5,6 +5,7 @@
 
 #include "files.h"
 #include "zdoomsupport.h"
+#include "zstring.h"
 
 #if defined(_MSC_VER) || defined(__WATCOMC__)
 #define STACK_ARGS __cdecl
@@ -13,13 +14,14 @@
 #endif
 
 class FResourceFile;
+class FTexture;
 
 struct FResourceLump
 {
 	friend class FResourceFile;
 
 	int				LumpSize;
-	char *			FullName;		// only valid for files loaded from a .zip file
+	FString			FullName;		// only valid for files loaded from a non-wad archive
 	union
 	{
 		char		Name[9];
@@ -31,17 +33,18 @@ struct FResourceLump
 	SBYTE			RefCount;
 	char *			Cache;
 	FResourceFile *	Owner;
+	FTexture *		LinkedTexture;
 	int				Namespace;
 
 	FResourceLump()
 	{
-		FullName = NULL;
 		Cache = NULL;
 		Owner = NULL;
 		Flags = 0;
 		RefCount = 0;
 		Namespace = 0;	// ns_global
 		*Name = 0;
+		LinkedTexture = NULL;
 	}
 
 	virtual ~FResourceLump();
@@ -50,7 +53,7 @@ struct FResourceLump
 	virtual int GetFileOffset() { return -1; }
 	virtual int GetIndexNum() const { return 0; }
 	virtual void DoFinishRemap() {} // For handling any changes that may happen after the WL6 remapper takes action
-	void LumpNameSetup(const char *iname);
+	void LumpNameSetup(FString iname);
 	void CheckEmbedded();
 
 	void *CacheLump();
@@ -71,8 +74,16 @@ protected:
 
 	FResourceFile(const char *filename, FileReader *r);
 
+	// for archives that can contain directories
+	void PostProcessArchive(void *lumps, size_t lumpsize);
+
 private:
 	DWORD FirstLump;
+
+	int FilterLumps(FString filtername, void *lumps, size_t lumpsize, DWORD max);
+	//int FilterLumpsByGameType(int gametype, void *lumps, size_t lumpsize, DWORD max);
+	bool FindPrefixRange(FString filter, void *lumps, size_t lumpsize, DWORD max, DWORD &start, DWORD &end);
+	void JunkLeftoverFilters(void *lumps, size_t lumpsize, DWORD max);
 
 public:
 	static FResourceFile *OpenResourceFile(const char *filename, FileReader *file, bool quiet = false);
@@ -124,9 +135,33 @@ struct FExternalLump : public FResourceLump
 
 };
 
+//==========================================================================
+//
+// FileReader that reads from a lump's cache
+//
+//==========================================================================
 
+class FLumpReader : public MemoryReader
+{
+	FResourceLump *source;
 
+public:
+	FLumpReader(FResourceLump *src)
+		: MemoryReader(NULL, src->LumpSize), source(src)
+	{
+		src->CacheLump();
+		bufptr = src->Cache;
+	}
 
+	~FLumpReader()
+	{
+		source->ReleaseCache();
+	}
 
+	FResourceFile *LumpOwner() const
+	{
+		return source->Owner;
+	}
+};
 
 #endif

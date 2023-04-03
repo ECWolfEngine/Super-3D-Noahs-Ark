@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include "c_cvars.h"
+#include "colormatcher.h"
 #include "wl_def.h"
 #include "id_in.h"
 #include "id_vl.h"
@@ -31,33 +32,60 @@
 #endif
 
 bool fullscreen = true;
-bool usedoublebuffering = true;
 unsigned screenWidth = 848;
 unsigned screenHeight = 480;
+unsigned fullScreenWidth = 848;
+unsigned fullScreenHeight = 480;
+unsigned windowedScreenWidth = 848;
+unsigned windowedScreenHeight = 480;
 unsigned screenBits = static_cast<unsigned> (-1);      // use "best" color depth according to libSDL
 float screenGamma = 1.0f;
 
-SDL_Surface *curSurface = NULL;
 unsigned curPitch;
 
 unsigned scaleFactorX, scaleFactorY;
 
 bool	 screenfaded;
 
-static struct
+//===========================================================================
+
+void VL_ToggleFullscreen()
 {
-	uint8_t r,g,b;
-	int amount;
-} currentBlend;
+	VL_SetFullscreen(!fullscreen);
+}
+
+void VL_SetFullscreen(bool isFull)
+{
+	vid_fullscreen = fullscreen = isFull;
+
+	if (fullscreen)
+	{
+		screenWidth = fullScreenWidth;
+		screenHeight = fullScreenHeight;
+	}
+	else
+	{
+		screenWidth = windowedScreenWidth;
+		screenHeight = windowedScreenHeight;
+	}
+
+	// Recalculate the aspect ratio, because this can change from fullscreen to windowed now
+	r_ratio = static_cast<Aspect>(CheckRatio(screenWidth, screenHeight));
+	VL_SetVGAPlaneMode();
+	if(playstate)
+	{
+		DrawPlayScreen();
+	}
+	IN_AdjustMouse();
+}
 
 //===========================================================================
 
 void VL_ReadPalette(const char* lump)
 {
 	InitPalette(lump);
-	if(currentBlend.amount)
-		V_SetBlend(currentBlend.r, currentBlend.g, currentBlend.b, currentBlend.amount);
 	R_InitColormaps();
+	TexMan.InvalidatePalette();
 	V_RetranslateFonts();
 }
 
@@ -72,6 +100,9 @@ void VL_ReadPalette(const char* lump)
 void I_InitGraphics ();
 void	VL_SetVGAPlaneMode (bool forSignon)
 {
+	if(!forSignon)
+		screen->Unlock();
+
 	I_InitGraphics();
 	Video->SetResolution(screenWidth, screenHeight, 8);
 	screen->Lock(true);
@@ -81,12 +112,12 @@ void	VL_SetVGAPlaneMode (bool forSignon)
 	scaleFactorX = CleanXfac;
 	scaleFactorY = CleanYfac;
 
-	pixelangle = (short *) malloc(SCREENWIDTH * sizeof(short));
-	CHECKMALLOCRESULT(pixelangle);
-	wallheight = (int *) malloc(SCREENWIDTH * sizeof(int));
-	CHECKMALLOCRESULT(wallheight);
+	pixelangle = new short[SCREENWIDTH];
+	wallheight = new int[SCREENWIDTH];
 
 	NewViewSize(viewsize);
+
+	screen->Lock(false);
 }
 
 /*
@@ -99,6 +130,28 @@ void	VL_SetVGAPlaneMode (bool forSignon)
 =============================================================================
 */
 
+FBlendFader::FBlendFader(int start, int end, int red, int green, int blue, int steps)
+: start(start<<FRACBITS), end(end<<FRACBITS), red(red), green(green),
+  blue(blue), fadems(TICS2MS(steps)), startms(SDL_GetTicks()),
+  aStep((this->end-this->start)/fadems)
+{
+}
+
+bool FBlendFader::Update()
+{
+	int32_t curtime;
+	if((curtime = SDL_GetTicks() - startms) < fadems)
+	{
+		V_SetBlend(red, green, blue, (start+curtime*aStep)>>FRACBITS);
+		return false;
+	}
+	else
+	{
+		V_SetBlend(red, green, blue, end>>FRACBITS);
+		return true;
+	}
+}
+
 /*
 =================
 =
@@ -109,32 +162,13 @@ void	VL_SetVGAPlaneMode (bool forSignon)
 =================
 */
 
-static int fadeR = 0, fadeG = 0, fadeB = 0;
+static FBlendFader fade(0, 0, 0, 0, 0, 1);
 void VL_Fade (int start, int end, int red, int green, int blue, int steps)
 {
-	end <<= FRACBITS;
-	start <<= FRACBITS;
+	fade = FBlendFader(start, end, red, green, blue, steps);
 
-	const fixed aStep = (end-start)/steps;
-
-	VL_WaitVBL(1);
-
-//
-// fade through intermediate frames
-//
-	for (int a = start;(aStep < 0 ? a > end : a < end);a += aStep)
-	{
-		if(!usedoublebuffering || screenBits == 8) VL_WaitVBL(1);
-		V_SetBlend(red, green, blue, a>>FRACBITS);
+	while(!fade.Update())
 		VH_UpdateScreen();
-	}
-
-//
-// final color
-//
-	V_SetBlend (red,green,blue,end>>FRACBITS);
-	// Not quite sure why I need to call this twice.
-	VH_UpdateScreen();
 	VH_UpdateScreen();
 
 	screenfaded = end != 0;
@@ -146,9 +180,6 @@ void VL_Fade (int start, int end, int red, int green, int blue, int steps)
 
 void VL_FadeOut (int start, int end, int red, int green, int blue, int steps)
 {
-	fadeR = red;
-	fadeG = green;
-	fadeB = blue;
 	VL_Fade(start, end, red, green, blue, steps);
 }
 
@@ -164,7 +195,23 @@ void VL_FadeOut (int start, int end, int red, int green, int blue, int steps)
 void VL_FadeIn (int start, int end, int steps)
 {
 	if(screenfaded)
-		VL_Fade(end, start, fadeR, fadeG, fadeB, steps);
+		VL_Fade(end, start, fade.R(), fade.G(), fade.B(), steps);
+}
+
+/*
+=================
+=
+= VL_FadeIn
+= Match fade color and remove palette blend
+=
+=================
+*/
+
+void VL_FadeClear ()
+{
+	VWB_Clear(ColorMatcher.Pick(fade.R(), fade.G(), fade.B()), 0, 0, screenWidth, screenHeight);
+	V_SetBlend(0, 0, 0, 0);
+	VH_UpdateScreen();
 }
 
 /*

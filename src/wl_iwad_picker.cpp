@@ -36,7 +36,7 @@ extern bool GtkAvailable;
 // where pressing Return can still activate the default button.
 gint AllowDefault(GtkWidget *widget, GdkEventKey *event, gpointer func_data)
 {
-	if (event->type == GDK_KEY_PRESS && event->keyval == GDK_Return)
+	if (event->type == GDK_KEY_PRESS && event->keyval == GDK_KEY_Return)
 	{
 		gtk_window_activate_default (GTK_WINDOW(func_data));
 	}
@@ -57,7 +57,7 @@ gint DoubleClickChecker(GtkWidget *widget, GdkEventButton *event, gpointer func_
 // When the user presses escape, that should be the same as canceling the dialog.
 gint CheckEscape (GtkWidget *widget, GdkEventKey *event, gpointer func_data)
 {
-	if (event->type == GDK_KEY_PRESS && event->keyval == GDK_Escape)
+	if (event->type == GDK_KEY_PRESS && event->keyval == GDK_KEY_Escape)
 	{
 		gtk_main_quit();
 	}
@@ -87,22 +87,25 @@ int I_PickIWad_Gtk (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 	int close_style = 0;
 	int i;
 
+	FString caption;
+	caption.Format("%s: Select an IWAD to use", GetGameCaption());
+
 	// Create the dialog window.
 	window = gtk_window_new (GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_title (GTK_WINDOW(window), GAMESIG " " DOTVERSIONSTR ": Select an IWAD to use");
+	gtk_window_set_title (GTK_WINDOW(window), caption);
 	gtk_window_set_position (GTK_WINDOW(window), GTK_WIN_POS_CENTER);
 	gtk_container_set_border_width (GTK_CONTAINER(window), 10);
 	g_signal_connect (window, "delete_event", G_CALLBACK(gtk_main_quit), NULL);
 	g_signal_connect (window, "key_press_event", G_CALLBACK(CheckEscape), NULL);
 
 	// Create the vbox container.
-	vbox = gtk_vbox_new (FALSE, 10);
+	vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 10);
 	gtk_container_add (GTK_CONTAINER(window), vbox);
 
 	// Create the top label.
 	widget = gtk_label_new (GAMENAME " found more than one IWAD\nSelect from the list below to determine which one to use:");
 	gtk_box_pack_start (GTK_BOX(vbox), widget, false, false, 0);
-	gtk_misc_set_alignment (GTK_MISC(widget), 0, 0);
+	gtk_widget_set_halign (widget, GTK_ALIGN_START);
 
 	// Create a list store with all the found IWADs.
 	store = gtk_list_store_new (3, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_INT);
@@ -115,7 +118,7 @@ int I_PickIWad_Gtk (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 			if(filepart.IsEmpty())
 				filepart = wads[i].Path[0];
 			else
-				filepart.Mid(1);
+				filepart = filepart.Mid(1);
 		}
 		else
 			filepart.Format("*.%s", wads[i].Extension.GetChars());
@@ -148,7 +151,7 @@ int I_PickIWad_Gtk (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 	gtk_tree_selection_select_iter (selection, &defiter);
 
 	// Create the hbox for the bottom row.
-	hbox = gtk_hbox_new (FALSE, 0);
+	hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_box_pack_end (GTK_BOX(vbox), hbox, false, false, 0);
 
 	// Create the "Don't ask" checkbox.
@@ -157,21 +160,21 @@ int I_PickIWad_Gtk (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON(check), !showwin);
 
 	// Create the OK/Cancel button box.
-	bbox = gtk_hbutton_box_new ();
+	bbox = gtk_button_box_new (GTK_ORIENTATION_HORIZONTAL);
 	gtk_button_box_set_layout (GTK_BUTTON_BOX(bbox), GTK_BUTTONBOX_END);
 	gtk_box_set_spacing (GTK_BOX(bbox), 10);
 	gtk_box_pack_end (GTK_BOX(hbox), bbox, false, false, 0);
 
 	// Create the OK button.
-	widget = gtk_button_new_from_stock (GTK_STOCK_OK);
+	widget = gtk_button_new_with_label ("OK");
 	gtk_box_pack_start (GTK_BOX(bbox), widget, false, false, 0);
-	GTK_WIDGET_SET_FLAGS (widget, GTK_CAN_DEFAULT);
+	gtk_widget_set_can_default (widget, true);
 	gtk_widget_grab_default (widget);
 	g_signal_connect (widget, "clicked", G_CALLBACK(ClickedOK), &close_style);
 	g_signal_connect (widget, "activate", G_CALLBACK(ClickedOK), &close_style);
 
 	// Create the cancel button.
-	widget = gtk_button_new_from_stock (GTK_STOCK_CANCEL);
+	widget = gtk_button_new_with_label ("Cancel");
 	gtk_box_pack_start (GTK_BOX(bbox), widget, false, false, 0);
 	g_signal_connect (widget, "clicked", G_CALLBACK(gtk_main_quit), &window);
 
@@ -227,9 +230,10 @@ int I_PickIWad (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 	const char *str;
 	if((str=getenv("KDE_FULL_SESSION")) && strcmp(str, "true") == 0)
 	{
-		FString cmd("kdialog --title \""GAMESIG" "DOTVERSIONSTR": Select an IWAD to use\""
-		            " --menu \"" GAMENAME " found more than one IWAD\n"
-		            "Select from the list below to determine which one to use:\"");
+		FString cmd;
+		cmd.Format("kdialog --title \"%s: Select an IWAD to use\""
+		           " --menu \"" GAMENAME " found more than one IWAD\n"
+		           "Select from the list below to determine which one to use:\"", GetGameCaption());
 
 		for(i = 0; i < numwads; ++i)
 		{
@@ -240,7 +244,7 @@ int I_PickIWad (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 				if(filepart.IsEmpty())
 					filepart = wads[i].Path[0];
 				else
-					filepart.Mid(1);
+					filepart = filepart.Mid(1);
 			}
 			else
 				filepart.Format("*.%s", wads[i].Extension.GetChars());
@@ -259,7 +263,7 @@ int I_PickIWad (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 				if(filepart.IsEmpty())
 					filepart = wads[defaultiwad].Path[0];
 				else
-					filepart.Mid(1);
+					filepart = filepart.Mid(1);
 			}
 			else
 				filepart.Format("*.%s", wads[defaultiwad].Extension.GetChars());
@@ -307,7 +311,7 @@ int I_PickIWad (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 			if(filepart.IsEmpty())
 				filepart = wads[i].Path[0];
 			else
-				filepart.Mid(1);
+				filepart = filepart.Mid(1);
 		}
 		else
 			filepart.Format("*.%s", wads[i].Extension.GetChars());
@@ -320,11 +324,12 @@ int I_PickIWad (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 #else
 	if (!TXT_Init())
 	{
-		fprintf(stderr, "Failed to initialise GUI\n");
-		exit(-1);
+		I_FatalError("Failed to initialise GUI");
 	}
 
-    TXT_SetDesktopTitle(const_cast<char*>(GAMESIG" "DOTVERSIONSTR": Select an IWAD to use"));
+	FString caption;
+	caption.Format("%s: Select an IWAD to use", GetGameCaption());
+    TXT_SetDesktopTitle(const_cast<char*>(caption.GetChars()));
 	window = TXT_NewWindow(const_cast<char*>("Pick a game wad"));
 	txt_table_t *table = TXT_NewTable(1);
 
@@ -339,7 +344,7 @@ int I_PickIWad (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 			if(filepart.IsEmpty())
 				filepart = wads[i].Path[0];
 			else
-				filepart.Mid(1);
+				filepart = filepart.Mid(1);
 		}
 		else
 			filepart.Format("*.%s", wads[i].Extension.GetChars());
@@ -353,14 +358,6 @@ int I_PickIWad (WadStuff *wads, int numwads, bool showwin, int defaultiwad)
 
 	TXT_Shutdown();
 
-	if (I_WADSEL > -1)
-		return I_WADSEL;
-	else
-	{
-		printf("User canceled.\n");
-		exit(-1);
-	}
-
-	return i-1;
+	return I_WADSEL;
 #endif
 }

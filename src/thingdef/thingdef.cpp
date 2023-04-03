@@ -44,18 +44,15 @@
 #include "wl_def.h"
 #include "wl_draw.h"
 #include "thingdef/thingdef.h"
-#include "thingdef/thingdef_type.h"
+#include "thingdef/thingdef_codeptr.h"
 #include "thingdef/thingdef_expression.h"
+#include "thingdef/thingdef_parse.h"
+#include "thingdef/thingdef_type.h"
 #include "thinker.h"
 #include "templates.h"
 #include "g_mapinfo.h"
 
 #include <climits>
-
-// Code pointer stuff
-void InitFunctionTable(ActionTable *table);
-void ReleaseFunctionTable();
-ActionInfo *LookupFunction(const FName &func, const ActionTable *table);
 
 typedef DWORD flagstype_t;
 
@@ -77,6 +74,7 @@ const struct FlagDef
 	DEFINE_FLAG(IF, ALWAYSPICKUP, Inventory, itemFlags),
 	DEFINE_FLAG(FL, AMBUSH, Actor, flags),
 	DEFINE_FLAG(IF, AUTOACTIVATE, Inventory, itemFlags),
+	DEFINE_FLAG(FL, BILLBOARD, Actor, flags),
 	DEFINE_FLAG(FL, BRIGHT, Actor, flags),
 	DEFINE_FLAG(FL, CANUSEWALLS, Actor, flags),
 	DEFINE_FLAG(FL, COUNTITEM, Actor, flags),
@@ -107,6 +105,7 @@ extern const PropDef properties[];
 StateLabel::StateLabel(const FString &str, const ClassDef *parent, bool noRelative)
 {
 	Scanner sc(str.GetChars(), str.Len());
+	sc.SetScriptIdentifier("StateLabel");
 	Parse(sc, parent, noRelative);
 }
 
@@ -136,6 +135,15 @@ const Frame *StateLabel::Resolve(AActor *owner, const Frame *caller, const Frame
 void StateLabel::Parse(Scanner &sc, const ClassDef *parent, bool noRelative)
 {
 	cls = parent;
+
+	// Empty string?
+	if(!sc.TokensLeft())
+	{
+		isRelative = false;
+		isDefault = false;
+		label = "";
+		return;
+	}
 
 	if(!noRelative && sc.CheckToken(TK_IntConst))
 	{
@@ -192,34 +200,9 @@ void StateLabel::Parse(Scanner &sc, const ClassDef *parent, bool noRelative)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct StateDefinition
-{
-	public:
-		enum NextType
-		{
-			GOTO,
-			LOOP,
-			WAIT,
-			STOP,
-
-			NORMAL
-		};
-
-		FString		label;
-		char		sprite[5];
-		FString		frames;
-		int			duration;
-		unsigned	randDuration;
-		bool		fullbright;
-		NextType	nextType;
-		FString		nextArg;
-		StateLabel	jumpLabel;
-		Frame::ActionCall	functions[2];
-};
-
 static TArray<const SymbolInfo *> *symbolPool = NULL;
 
-SymbolInfo::SymbolInfo(const ClassDef *cls, const FName &var, const int offset) :
+SymbolInfo::SymbolInfo(const ClassDef *cls, const FName var, const int offset) :
 	cls(cls), var(var), offset(offset)
 {
 	if(symbolPool == NULL)
@@ -227,7 +210,19 @@ SymbolInfo::SymbolInfo(const ClassDef *cls, const FName &var, const int offset) 
 	symbolPool->Push(this);
 }
 
-int SymbolCompare(const void *s1, const void *s2)
+const SymbolInfo *SymbolInfo::LookupSymbol(const ClassDef *cls, FName var)
+{
+	for (unsigned int i = 0; i < symbolPool->Size(); ++i)
+	{
+		// I think the symbol pool will be small enough to do a
+		// linear search on.
+		if ((*symbolPool)[i]->cls == cls && (*symbolPool)[i]->var == var)
+			return (*symbolPool)[i];
+	}
+	return NULL;
+}
+
+static int SymbolCompare(const void *s1, const void *s2)
 {
 	const Symbol * const sym1 = *((const Symbol **)s1);
 	const Symbol * const sym2 = *((const Symbol **)s2);
@@ -283,7 +278,7 @@ static const struct ExpressionFunction
 	{ "random",		TypeHierarchy::INT,		2,	true,	ExprRandom },
 	{ "sin",		TypeHierarchy::FLOAT,	1,	false,	ExprSin },
 
-	{ NULL, 0, false, NULL }
+	{ NULL, 0, 0, false, NULL }
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -470,6 +465,9 @@ static TMap<int, ClassDef *> EditorNumberTable, ConversationIDTable;
 SymbolTable ClassDef::globalSymbols;
 bool ClassDef::bShutdown = false;
 
+// Minimize warning spam for deprecated feature in 1.4
+static bool g_ThingEdNumWarning;
+
 ClassDef::ClassDef() : tentative(false)
 {
 	defaultInstance = NULL;
@@ -491,6 +489,37 @@ TMap<FName, ClassDef *> &ClassDef::ClassTable()
 {
 	static TMap<FName, ClassDef *> classTable;
 	return classTable;
+}
+
+void ClassDef::AddGlobalSymbol(Symbol *sym)
+{
+	// We must insert the constant into the table at the proper place
+	// now since the next const may try to reference it.
+	if(globalSymbols.Size() > 0)
+	{
+		unsigned int min = 0;
+		unsigned int max = globalSymbols.Size()-1;
+		unsigned int mid = max/2;
+		if(max > 0)
+		{
+			do
+			{
+				if(globalSymbols[mid]->GetName() > sym->GetName())
+					max = mid-1;
+				else if(globalSymbols[mid]->GetName() < sym->GetName())
+					min = mid+1;
+				else
+					break;
+				mid = (min+max)/2;
+			}
+			while(max >= min && max < globalSymbols.Size());
+		}
+		if(globalSymbols[mid]->GetName() <= sym->GetName())
+			++mid;
+		globalSymbols.Insert(mid, sym);
+	}
+	else
+		globalSymbols.Push(sym);
 }
 
 const size_t ClassDef::POINTER_END = ~(size_t)0;
@@ -597,6 +626,18 @@ AActor *ClassDef::CreateInstance() const
 	newactor->Init();
 	return newactor;
 }
+
+// Perform any actions necessary after actor class is completely parsed
+void ClassDef::FinalizeActorClass()
+{
+	// Sort the symbol table.
+	qsort(&symbols[0], symbols.Size(), sizeof(symbols[0]), SymbolCompare);
+
+	// Register conversation id into table if assigned
+	if(int convid = Meta.GetMetaInt(AMETA_ConversationID))
+		ConversationIDTable[convid] = this;
+}
+
 
 const ClassDef *ClassDef::FindClass(unsigned int ednum)
 {
@@ -729,10 +770,9 @@ const ClassDef *ClassDef::GetReplacement(bool respectMapinfo) const
 
 struct Goto
 {
-	public:
-		Frame		*frame;
-		FString		remapLabel; // Label: goto Label2
-		StateLabel	jumpLabel;
+	Frame *frame;
+	FString remapLabel; // Label: goto Label2
+	StateLabel jumpLabel;
 };
 void ClassDef::InstallStates(const TArray<StateDefinition> &stateDefs)
 {
@@ -779,7 +819,7 @@ void ClassDef::InstallStates(const TArray<StateDefinition> &stateDefs)
 					continue;
 				}
 				default:
-					Quit("Tried to use a loop on a frameless state.\n");
+					I_FatalError("Tried to use a loop on a frameless state.");
 					break;
 			}
 			continue;
@@ -797,6 +837,8 @@ void ClassDef::InstallStates(const TArray<StateDefinition> &stateDefs)
 			thisFrame->duration = thisStateDef.duration;
 			thisFrame->randDuration = thisStateDef.randDuration;
 			thisFrame->fullbright = thisStateDef.fullbright;
+			thisFrame->offsetX = thisStateDef.offsetX;
+			thisFrame->offsetY = thisStateDef.offsetY;
 			thisFrame->action = thisStateDef.functions[0];
 			thisFrame->thinker = thisStateDef.functions[1];
 			thisFrame->next = NULL;
@@ -901,7 +943,8 @@ void ClassDef::LoadActors()
 	int lump = 0;
 	while((lump = Wads.FindLump("DECORATE", &lastLump)) != -1)
 	{
-		ParseDecorateLump(lump);
+		FDecorateParser parser(lump);
+		parser.Parse();
 	}
 
 	ReleaseFunctionTable();
@@ -936,631 +979,53 @@ void ClassDef::LoadActors()
 	}
 }
 
-void ClassDef::ParseActor(Scanner &sc)
+// Return true if we were able to initialize the actor with whatever sane defaults we may have; false if we were not
+bool ClassDef::InitializeActorClass(bool isNative)
 {
-	// Read the header
-	sc.MustGetToken(TK_Identifier);
-	ClassDef **classRef = ClassTable().CheckKey(sc->str);
-	ClassDef *newClass;
-	bool previouslyDefined = classRef != NULL;
-	if(!previouslyDefined)
+	if(!isNative) // Initialize the default instance to the nearest native class.
 	{
-		newClass = new ClassDef();
-		ClassTable()[sc->str] = newClass;
-	}
-	else
-		newClass = *classRef;
-	bool native = false;
-	newClass->name = sc->str;
-	if(sc.CheckToken(':'))
-	{
-		sc.MustGetToken(TK_Identifier);
-		const ClassDef *parent = FindClass(sc->str);
-		if(parent == NULL || parent->tentative)
-			sc.ScriptMessage(Scanner::ERROR, "Could not find parent actor '%s'", sc->str.GetChars());
-		if(newClass->tentative && !parent->IsDescendantOf(newClass->parent))
-			sc.ScriptMessage(Scanner::ERROR, "Parent for actor expected to be '%s'", newClass->parent->GetName().GetChars());
-		newClass->parent = parent;
-	}
-	else
-	{
-		// If no class was specified to inherit from, inherit from AActor, but not for AActor.
-		if(newClass != NATIVE_CLASS(Actor))
-			newClass->parent = NATIVE_CLASS(Actor);
-	}
+		ConstructNative = parent->ConstructNative;
+		size = parent->size;
 
-	// Handle class replacements
-	if(sc.CheckToken(TK_Identifier))
-	{
-		if(sc->str.CompareNoCase("replaces") == 0)
-		{
-			sc.MustGetToken(TK_Identifier);
-
-			if(sc->str.CompareNoCase(newClass->name) == 0)
-				sc.ScriptMessage(Scanner::ERROR, "Actor '%s' attempting to replace itself!", sc->str.GetChars());
-
-			ClassDef *replacee = const_cast<ClassDef *>(FindClassTentative(sc->str, NATIVE_CLASS(Actor)));
-			replacee->replacement = newClass;
-			newClass->replacee = replacee;
-		}
-		else
-			sc.Rewind();
-	}
-
-	if(sc.CheckToken(TK_IntConst))
-	{
-		if(EditorNumberTable.CheckKey(sc->number) != NULL)
-			sc.ScriptMessage(Scanner::WARNING, "Overwriting editor number %d previously assigned to '%s', use replaces instead.", sc->number, EditorNumberTable[sc->number]->GetName().GetChars());
-		EditorNumberTable[sc->number] = newClass;
-	}
-	if(sc.CheckToken(TK_Identifier))
-	{
-		if(sc->str.CompareNoCase("native") == 0)
-			native = true;
-		else
-			sc.ScriptMessage(Scanner::ERROR, "Unknown keyword '%s'.", sc->str.GetChars());
-	}
-	if(previouslyDefined && !native && !newClass->tentative)
-		sc.ScriptMessage(Scanner::ERROR, "Actor '%s' already defined.", newClass->name.GetChars());
-	else
-		newClass->tentative = false;
-
-	if(!native) // Initialize the default instance to the nearest native class.
-	{
-		newClass->ConstructNative = newClass->parent->ConstructNative;
-		newClass->size = newClass->parent->size;
-
-		newClass->defaultInstance = (DObject *) M_Malloc(newClass->parent->size);
-		memcpy((void*)newClass->defaultInstance, (void*)newClass->parent->defaultInstance, newClass->parent->size);
+		defaultInstance = (DObject *) M_Malloc(parent->size);
+		memcpy((void*)defaultInstance, (void*)parent->defaultInstance, parent->size);
 	}
 	else
 	{
 		// This could happen if a non-native actor is declared native or
 		// possibly in the case of a stuck dependency.
-		if(!newClass->defaultInstance)
-			sc.ScriptMessage(Scanner::ERROR, "Uninitialized default instance for '%s'.", newClass->GetName().GetChars());
+		if(!defaultInstance)
+			return false;
 
 		// Copy the parents defaults for native classes
-		if(newClass->parent)
-			memcpy((void*)newClass->defaultInstance, (void*)newClass->parent->defaultInstance, newClass->parent->size);
+		if(parent)
+			memcpy((void*)defaultInstance, (void*)parent->defaultInstance, parent->size);
 	}
+
 	// Copy properties and flags.
-	if(newClass->parent != NULL)
+	if(parent != NULL)
 	{
-		memcpy((void*)newClass->defaultInstance, (void*)newClass->parent->defaultInstance, newClass->parent->size);
-		newClass->defaultInstance->Class = newClass;
-		newClass->Meta = newClass->parent->Meta;
+		memcpy((void*)defaultInstance, (void*)parent->defaultInstance, parent->size);
+		defaultInstance->Class = this;
+		Meta = parent->Meta;
 	}
 
-	bool actionsSorted = true;
-	sc.MustGetToken('{');
-	while(!sc.CheckToken('}'))
-	{
-		if(sc.CheckToken('+') || sc.CheckToken('-'))
-		{
-			bool set = sc->token == '+';
-			FString prefix;
-			sc.MustGetToken(TK_Identifier);
-			FString flagName = sc->str;
-			if(sc.CheckToken('.'))
-			{
-				prefix = flagName;
-				sc.MustGetToken(TK_Identifier);
-				flagName = sc->str;
-			}
-			if(!SetFlag(newClass, (AActor*)newClass->defaultInstance, prefix, flagName, set))
-				sc.ScriptMessage(Scanner::WARNING, "Unknown flag '%s' for actor '%s'.", flagName.GetChars(), newClass->name.GetChars());
-		}
-		else
-		{
-			sc.MustGetToken(TK_Identifier);
-			if(sc->str.CompareNoCase("states") == 0)
-			{
-				if(!actionsSorted)
-					InitFunctionTable(&newClass->actions);
-
-				TArray<StateDefinition> stateDefs;
-
-				sc.MustGetToken('{');
-				//sc.MustGetToken(TK_Identifier); // We should already have grabbed the identifier in all other cases.
-				bool needIdentifier = true;
-				bool infiniteLoopProtection = false;
-				while(sc->token != '}' && !sc.CheckToken('}'))
-				{
-					StateDefinition thisState;
-					thisState.sprite[0] = thisState.sprite[4] = 0;
-					thisState.duration = 0;
-					thisState.randDuration = 0;
-					thisState.nextType = StateDefinition::NORMAL;
-
-					if(needIdentifier)
-						sc.MustGetToken(TK_Identifier);
-					else
-						needIdentifier = true;
-					FString stateString = sc->str;
-					if(sc.CheckToken(':'))
-					{
-						infiniteLoopProtection = false;
-						thisState.label = stateString;
-						// New state
-						if(sc.CheckToken('}'))
-							sc.ScriptMessage(Scanner::ERROR, "State defined with no frames.");
-						sc.MustGetToken(TK_Identifier);
-
-						if(sc->str.CompareNoCase("stop") == 0)
-						{
-							thisState.nextType = StateDefinition::STOP;
-							if(!sc.CheckToken('}'))
-								sc.MustGetToken(TK_Identifier);
-						}
-						else if(sc->str.CompareNoCase("goto") == 0)
-						{
-							thisState.jumpLabel = StateLabel(sc, newClass, true);
-							thisState.nextType = StateDefinition::GOTO;
-							if(!sc.CheckToken('}'))
-								sc.MustGetToken(TK_Identifier);
-						}
-
-						stateString = sc->str;
-					}
-
-					if(thisState.nextType == StateDefinition::NORMAL &&
-						(sc.CheckToken(TK_Identifier) || sc.CheckToken(TK_StringConst)))
-					{
-						bool invalidSprite = (stateString.Len() != 4);
-						strncpy(thisState.sprite, stateString, 4);
-
-						infiniteLoopProtection = false;
-						if(invalidSprite) // We now know this is a frame so check sprite length
-							sc.ScriptMessage(Scanner::ERROR, "Sprite name must be exactly 4 characters long.");
-
-						R_LoadSprite(thisState.sprite);
-						thisState.frames = sc->str;
-						if(sc.CheckToken('-'))
-						{
-							sc.MustGetToken(TK_FloatConst);
-							thisState.duration = -1;
-						}
-						else
-						{
-							if(sc.CheckToken(TK_FloatConst))
-							{
-								// Eliminate confusion about fractional frame delays
-								if(!CheckTicsValid(sc->decimal))
-									sc.ScriptMessage(Scanner::ERROR, "Fractional frame durations must be exactly .5!");
-
-								thisState.duration = static_cast<int> (sc->decimal*2);
-							}
-							else if(stricmp(thisState.sprite, "goto") == 0)
-							{
-								thisState.nextType = StateDefinition::GOTO;
-								thisState.nextArg = thisState.frames;
-								thisState.frames = FString();
-							}
-							else if(sc.CheckToken(TK_Identifier))
-							{
-								if(sc->str.CompareNoCase("random") != 0)
-									sc.ScriptMessage(Scanner::ERROR, "Expected random frame duration.");
-
-								sc.MustGetToken('(');
-								sc.MustGetToken(TK_FloatConst);
-								if(!CheckTicsValid(sc->decimal))
-									sc.ScriptMessage(Scanner::ERROR, "Fractional frame durations must be exactly .5!");
-								thisState.duration = static_cast<int> (sc->decimal*2);
-								sc.MustGetToken(',');
-								sc.MustGetToken(TK_FloatConst);
-								if(!CheckTicsValid(sc->decimal))
-									sc.ScriptMessage(Scanner::ERROR, "Fractional frame durations must be exactly .5!");
-								thisState.randDuration = static_cast<int> (sc->decimal*2);
-								sc.MustGetToken(')');
-							}
-							else
-								sc.ScriptMessage(Scanner::ERROR, "Expected frame duration.");
-						}
-						thisState.functions[0].pointer = thisState.functions[1].pointer = NULL;
-						thisState.fullbright = false;
-
-						do
-						{
-							if(sc.CheckToken('}'))
-								goto FinishState;
-							else
-								sc.MustGetToken(TK_Identifier);
-
-							if(sc->str.CompareNoCase("bright") == 0)
-								thisState.fullbright = true;
-							else
-								break;
-						}
-						while(true);
-
-						if(thisState.nextType == StateDefinition::NORMAL)
-						{
-							for(int func = 0;func <= 2;func++)
-							{
-								if(sc.CheckToken(':'))
-								{
-									// We have a state label!
-									needIdentifier = false;
-									sc.Rewind();
-									break;
-								}
-								if(sc->str.Len() == 4 || func == 2)
-								{
-									if(sc->str.CompareNoCase("goto") == 0)
-									{
-										thisState.jumpLabel = StateLabel(sc, newClass, true);
-										thisState.nextType = StateDefinition::GOTO;
-									}
-									else if(sc->str.CompareNoCase("wait") == 0 || sc->str.CompareNoCase("fail") == 0)
-									{
-										thisState.nextType = StateDefinition::WAIT;
-									}
-									else if(sc->str.CompareNoCase("loop") == 0)
-									{
-										thisState.nextType = StateDefinition::LOOP;
-									}
-									else if(sc->str.CompareNoCase("stop") == 0)
-									{
-										thisState.nextType = StateDefinition::STOP;
-									}
-									else
-										needIdentifier = false;
-									break;
-								}
-								else
-								{
-									if(sc->str.CompareNoCase("NOP") != 0)
-									{
-										int specialNum = -1;
-										const ActionInfo *funcInf = newClass->FindFunction(sc->str, specialNum);
-										if(funcInf)
-										{
-											thisState.functions[func].pointer = *funcInf->func;
-
-											CallArguments *&ca = thisState.functions[func].args;
-											ca = new CallArguments();
-											CallArguments::Value val;
-											unsigned int argc = 0;
-
-											// When using a line special we have to inject a parameter.
-											if(specialNum >= 0)
-											{
-												val.useType = CallArguments::Value::VAL_INTEGER;
-												val.isExpression = false;
-												val.val.i = specialNum;
-												ca->AddArgument(val);
-												++argc;
-											}
-				
-											if(sc.CheckToken('('))
-											{
-												if(funcInf->maxArgs == 0)
-													sc.MustGetToken(')');
-												else if(!(funcInf->minArgs == 0 && sc.CheckToken(')')))
-												{
-													do
-													{
-														val.isExpression = false;
-
-														const Type *argType = funcInf->ArgType(argc);
-														if(argType == TypeHierarchy::staticTypes.GetType(TypeHierarchy::INT) ||
-															argType == TypeHierarchy::staticTypes.GetType(TypeHierarchy::FLOAT) ||
-															argType == TypeHierarchy::staticTypes.GetType(TypeHierarchy::BOOL))
-														{
-															val.isExpression = true;
-															if(argType == TypeHierarchy::staticTypes.GetType(TypeHierarchy::INT))
-																val.useType = CallArguments::Value::VAL_INTEGER;
-															else
-																val.useType = CallArguments::Value::VAL_DOUBLE;
-															val.expr = ExpressionNode::ParseExpression(newClass, TypeHierarchy::staticTypes, sc);
-														}
-														else if(argType == TypeHierarchy::staticTypes.GetType(TypeHierarchy::STATE))
-														{
-															val.useType = CallArguments::Value::VAL_STATE;
-															if(sc.CheckToken(TK_IntConst))
-															{
-																if(thisState.frames.Len() > 1)
-																	sc.ScriptMessage(Scanner::ERROR, "State offsets not allowed on multistate definitions.");
-																FString label;
-																label.Format("%d", sc->number);
-																val.label = StateLabel(label, newClass);
-															}
-															else
-															{
-																sc.MustGetToken(TK_StringConst);
-																val.label = StateLabel(sc->str, newClass);
-															}
-														}
-														else
-														{
-															sc.MustGetToken(TK_StringConst);
-															val.useType = CallArguments::Value::VAL_STRING;
-															val.str = sc->str;
-														}
-														ca->AddArgument(val);
-														++argc;
-
-														// Check if we can or should take another argument
-														if(!funcInf->varArgs && argc >= funcInf->maxArgs)
-															break;
-													}
-													while(sc.CheckToken(','));
-													sc.MustGetToken(')');
-												}
-											}
-											if(argc < funcInf->minArgs)
-												sc.ScriptMessage(Scanner::ERROR, "Too few arguments.");
-											else
-											{
-												// Push unused defaults.
-												while(argc < funcInf->maxArgs)
-													ca->AddArgument(funcInf->defaults[(argc++)-funcInf->minArgs]);
-											}
-										}
-										else
-											sc.ScriptMessage(Scanner::WARNING, "Could not find function %s.", sc->str.GetChars());
-									}
-								}
-
-								if(!sc.CheckToken(TK_Identifier))
-									break;
-								else if(sc.CheckToken(':'))
-								{
-									needIdentifier = false;
-									sc.Rewind();
-									break;
-								}
-							}
-						}
-					}
-					else
-					{
-						thisState.sprite[0] = 0;
-						needIdentifier = false;
-						if(infiniteLoopProtection)
-							sc.ScriptMessage(Scanner::ERROR, "Malformed script.");
-						infiniteLoopProtection = true;
-					}
-				FinishState:
-					stateDefs.Push(thisState);
-				}
-
-				newClass->InstallStates(stateDefs);
-			}
-			else if(sc->str.CompareNoCase("action") == 0)
-			{
-				actionsSorted = false;
-				sc.MustGetToken(TK_Identifier);
-				if(sc->str.CompareNoCase("native") != 0)
-					sc.ScriptMessage(Scanner::ERROR, "Custom actions not supported.");
-				sc.MustGetToken(TK_Identifier);
-				ActionInfo *funcInf = LookupFunction(sc->str, NULL);
-				if(!funcInf)
-					sc.ScriptMessage(Scanner::ERROR, "The specified function %s could not be located.", sc->str.GetChars());
-				newClass->actions.Push(funcInf);
-				sc.MustGetToken('(');
-				if(!sc.CheckToken(')'))
-				{
-					bool optRequired = false;
-					do
-					{
-						// If we have processed at least one argument, then we can take varArgs.
-						if(funcInf->minArgs > 0 && sc.CheckToken(TK_Ellipsis))
-						{
-							funcInf->varArgs = true;
-							break;
-						}
-
-						sc.MustGetToken(TK_Identifier);
-						const Type *type = TypeHierarchy::staticTypes.GetType(sc->str);
-						if(type == NULL)
-							sc.ScriptMessage(Scanner::ERROR, "Unknown type %s.\n", sc->str.GetChars());
-						funcInf->types.Push(type);
-
-						if(sc->str.CompareNoCase("class") == 0)
-						{
-							sc.MustGetToken('<');
-							sc.MustGetToken(TK_Identifier);
-							sc.MustGetToken('>');
-						}
-						sc.MustGetToken(TK_Identifier);
-						if(optRequired || sc.CheckToken('='))
-						{
-							if(optRequired)
-								sc.MustGetToken('=');
-							else
-								optRequired = true;
-
-							CallArguments::Value defVal;
-							defVal.isExpression = false;
-
-							if(type == TypeHierarchy::staticTypes.GetType(TypeHierarchy::INT) ||
-								type == TypeHierarchy::staticTypes.GetType(TypeHierarchy::FLOAT)
-							)
-							{
-								ExpressionNode *node = ExpressionNode::ParseExpression(newClass, TypeHierarchy::staticTypes, sc);
-								const ExpressionNode::Value &val = node->Evaluate(NULL);
-								if(type == TypeHierarchy::staticTypes.GetType(TypeHierarchy::INT))
-								{
-									defVal.useType = CallArguments::Value::VAL_INTEGER;
-									defVal.val.i = val.GetInt();
-								}
-								else
-								{
-									defVal.useType = CallArguments::Value::VAL_DOUBLE;
-									defVal.val.d = val.GetDouble();
-								}
-								delete node;
-							}
-							else if(type == TypeHierarchy::staticTypes.GetType(TypeHierarchy::BOOL))
-							{
-								sc.MustGetToken(TK_BoolConst);
-								defVal.useType = CallArguments::Value::VAL_INTEGER;
-								defVal.val.i = sc->boolean;
-							}
-							else if(type == TypeHierarchy::staticTypes.GetType(TypeHierarchy::STATE))
-							{
-								defVal.useType = CallArguments::Value::VAL_STATE;
-								if(sc.CheckToken(TK_IntConst))
-									sc.ScriptMessage(Scanner::ERROR, "State offsets not allowed for defaults.");
-								else
-								{
-									sc.MustGetToken(TK_StringConst);
-									defVal.label = StateLabel(sc->str, newClass);
-								}
-							}
-							else
-							{
-								sc.MustGetToken(TK_StringConst);
-								defVal.useType = CallArguments::Value::VAL_STRING;
-								defVal.str = sc->str;
-							}
-							funcInf->defaults.Push(defVal);
-						}
-						else
-							++funcInf->minArgs;
-						++funcInf->maxArgs;
-					}
-					while(sc.CheckToken(','));
-					sc.MustGetToken(')');
-				}
-				sc.MustGetToken(';');
-			}
-			else if(sc->str.CompareNoCase("native") == 0)
-			{
-				sc.MustGetToken(TK_Identifier);
-				const Type *type = TypeHierarchy::staticTypes.GetType(sc->str);
-				if(type == NULL)
-					sc.ScriptMessage(Scanner::ERROR, "Unknown type %s.\n", sc->str.GetChars());
-				sc.MustGetToken(TK_Identifier);
-				FName varName(sc->str);
-				const SymbolInfo *symInf = NULL;
-				for(unsigned int i = 0;i < symbolPool->Size();++i)
-				{
-					// I think the symbol pool will be small enough to do a
-					// linear search on.
-					if((*symbolPool)[i]->cls == newClass && (*symbolPool)[i]->var == varName)
-					{
-						symInf = (*symbolPool)[i];
-						break;
-					}
-				}
-				if(symInf == NULL)
-					sc.ScriptMessage(Scanner::ERROR, "Could not identify symbol %s::%s.\n", newClass->name.GetChars(), varName.GetChars());
-				sc.MustGetToken(';');
-
-				newClass->symbols.Push(new VariableSymbol(varName, type, symInf->offset));
-			}
-			else
-			{
-				FString className("actor");
-				FString propertyName = sc->str;
-				if(sc.CheckToken('.'))
-				{
-					className = propertyName;
-					sc.MustGetToken(TK_Identifier);
-					propertyName = sc->str;
-				}
-
-				if(!SetProperty(newClass, className, propertyName, sc))
-				{
-					do
-					{
-						sc.GetNextToken();
-					}
-					while(sc.CheckToken(','));
-					sc.ScriptMessage(Scanner::WARNING, "Unknown property '%s' for actor '%s'.", propertyName.GetChars(), newClass->name.GetChars());
-				}
-			}
-		}
-	}
-
-	// Now sort the symbol table.
-	qsort(&newClass->symbols[0], newClass->symbols.Size(), sizeof(newClass->symbols[0]), SymbolCompare);
-	if(!actionsSorted)
-		InitFunctionTable(&newClass->actions);
-
-	// Register conversation id into table if assigned
-	if(int convid = newClass->Meta.GetMetaInt(AMETA_ConversationID))
-		ConversationIDTable[convid] = newClass;
+	return true;
 }
 
-void ClassDef::ParseDecorateLump(int lumpNum)
+void ClassDef::RegisterEdNum(unsigned int ednum)
 {
-	FWadLump lump = Wads.OpenLumpNum(lumpNum);
-	char* data = new char[Wads.LumpLength(lumpNum)];
-	lump.Read(data, Wads.LumpLength(lumpNum));
-	Scanner sc(data, Wads.LumpLength(lumpNum));
-	sc.SetScriptIdentifier(Wads.GetLumpFullName(lumpNum));
-
-	while(sc.TokensLeft())
+	if(ClassDef **conflictClass = EditorNumberTable.CheckKey(ednum))
 	{
-		if(sc.CheckToken('#'))
+		if(!replacee)
 		{
-			sc.MustGetToken(TK_Identifier);
-			if(sc->str.CompareNoCase("include") != 0)
-				sc.ScriptMessage(Scanner::ERROR, "Expected 'include' got '%s' instead.", sc->str.GetChars());
-			sc.MustGetToken(TK_StringConst);
-
-			int lmp = Wads.CheckNumForFullName(sc->str, true);
-			if(lmp == -1)
-				sc.ScriptMessage(Scanner::ERROR, "Could not find lump \"%s\".", sc->str.GetChars());
-			ParseDecorateLump(lmp);
-			continue;
+			// Treat as a replacement. This is the best compatibility we can do
+			// for now that the engine doesn't use editor numbers.
+			(*conflictClass)->replacement = this;
+			replacee = (*conflictClass);
 		}
-
-		sc.MustGetToken(TK_Identifier);
-		if(sc->str.CompareNoCase("actor") == 0)
-		{
-			ParseActor(sc);
-		}
-		else if(sc->str.CompareNoCase("const") == 0)
-		{
-			sc.MustGetToken(TK_Identifier);
-			const Type *type = TypeHierarchy::staticTypes.GetType(sc->str);
-			if(type == NULL)
-				sc.ScriptMessage(Scanner::ERROR, "Unknown type %s.\n", sc->str.GetChars());
-			sc.MustGetToken(TK_Identifier);
-			FName constName(sc->str);
-			sc.MustGetToken('=');
-			ExpressionNode *expr = ExpressionNode::ParseExpression(NATIVE_CLASS(Actor), TypeHierarchy::staticTypes, sc);
-			ConstantSymbol *newSym = new ConstantSymbol(constName, type, expr->Evaluate(NULL));
-			delete expr;
-			sc.MustGetToken(';');
-
-			// We must insert the constant into the table at the proper place
-			// now since the next const may try to reference it.
-			if(globalSymbols.Size() > 0)
-			{
-				unsigned int min = 0;
-				unsigned int max = globalSymbols.Size()-1;
-				unsigned int mid = max/2;
-				if(max > 0)
-				{
-					do
-					{
-						if(globalSymbols[mid]->GetName() > constName)
-							max = mid-1;
-						else if(globalSymbols[mid]->GetName() < constName)
-							min = mid+1;
-						else
-							break;
-						mid = (min+max)/2;
-					}
-					while(max >= min && max < globalSymbols.Size());
-				}
-				if(globalSymbols[mid]->GetName() <= constName)
-					++mid;
-				globalSymbols.Insert(mid, newSym);
-			}
-			else
-				globalSymbols.Push(newSym);
-		}
-		else
-			sc.ScriptMessage(Scanner::ERROR, "Unknown thing section '%s'.", sc->str.GetChars());
 	}
-	delete[] data;
+	EditorNumberTable[ednum] = this;
 }
 
 const Frame *ClassDef::ResolveStateIndex(unsigned int index) const
@@ -1726,14 +1191,14 @@ bool ClassDef::SetProperty(ClassDef *newClass, const char* className, const char
 
 			// Clean up
 			p = properties[mid].params;
-			unsigned int i = 0;
-			do
+			for (unsigned int i = 0; i < paramc; i++)
 			{
+				if(*p == 0)
+					break;
 				if(*p == 'S' || *p == 'K')
 					delete[] params[i].s;
-				i++;
+				p++;
 			}
-			while(*(++p) != 0 && i < paramc);
 			delete[] params;
 			return true;
 		}

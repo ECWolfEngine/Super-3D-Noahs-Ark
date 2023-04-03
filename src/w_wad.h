@@ -30,6 +30,7 @@
 class LumpRemapper;
 class FResourceFile;
 struct FResourceLump;
+class FTexture;
 
 struct wadinfo_t
 {
@@ -52,6 +53,8 @@ struct wadlump_t
 
 // [RH] Namespaces from BOOM.
 typedef enum {
+	ns_hidden = -1,
+
 	ns_global = 0,
 	ns_sprites,
 	ns_flats,
@@ -75,6 +78,8 @@ typedef enum {
 	ns_music,
 	ns_voxels,
 
+	ns_rottsky,
+
 	ns_firstskin,
 } namespace_t;
 
@@ -85,6 +90,7 @@ enum ELumpFlags
 	LUMPF_EMBEDDED=4,
 	LUMPF_BLOODCRYPT = 8,
 	LUMPF_DONTFLIPFLAT = 16,
+	LUMPF_DOUBLERESFLAT = 32,
 };
 
 
@@ -173,6 +179,9 @@ public:
 	int CheckNumForFullName (const char *name, int wadfile);
 	int GetNumForFullName (const char *name);
 
+	void SetLinkedTexture(int lump, FTexture *tex);
+	FTexture *GetLinkedTexture(int lump);
+
 
 	void ReadLump (int lump, void *dest);
 	FMemLump ReadLump (int lump);
@@ -194,7 +203,8 @@ public:
 	int GetLumpOffset (int lump);					// [RH] Returns offset of lump in the wadfile
 	int GetLumpFlags (int lump);					// Return the flags for this lump
 	void GetLumpName (char *to, int lump) const;	// [RH] Copies the lump name to to using uppercopy
-	const char *GetLumpFullName (int lump) const;	// [RH] Returns the lump's full name
+	void GetLumpName(FString &to, int lump) const;
+	const char *GetLumpFullName(int lump) const;	// [RH] Returns the lump's full name
 	FString GetLumpFullPath (int lump) const;		// [RH] Returns wad's name + lump's full name
 	int GetLumpFile (int lump) const;				// [RH] Returns wadnum for a specified lump
 	int GetLumpNamespace (int lump) const;			// [RH] Returns the namespace a lump belongs to

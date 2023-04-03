@@ -41,16 +41,16 @@ class MenuItem;
 
 namespace GameSave
 {
-	extern long long SaveVersion;
+	extern unsigned long long SaveVersion;
 	extern DWORD SaveProdVersion;
+	extern bool param_foreginsave;
 
 	Menu		&GetLoadMenu();
 	MenuItem	*GetLoadMenuItem();
 	Menu		&GetSaveMenu();
 	MenuItem	*GetSaveMenuItem();
 	void		InitMenus();
-	void		QuickLoad();
-	void		QuickSave();
+	void		QuickLoadOrSave(bool load);
 
 	bool		Load(const FString &filename);
 	bool		Save(const FString &filename, const FString &title);

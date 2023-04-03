@@ -44,6 +44,9 @@
 #include "w_wad.h"
 #include "zstring.h"
 #include "zdoomsupport.h"
+#ifdef _WIN32
+#include <malloc.h>
+#endif
 
 #define TEXTCOLOR_RED
 
@@ -188,8 +191,6 @@ class F7ZFile : public FResourceFile
 	F7ZLump *Lumps;
 	C7zArchive *Archive;
 
-	static int STACK_ARGS lumpcmp(const void * a, const void * b);
-
 public:
 	F7ZFile(const char * filename, FileReader *filer);
 	bool Open(bool quiet);
@@ -197,14 +198,6 @@ public:
 	virtual FResourceLump *GetLump(int no) { return ((unsigned)no < NumLumps)? &Lumps[no] : NULL; }
 };
 
-
-int STACK_ARGS F7ZFile::lumpcmp(const void * a, const void * b)
-{
-	F7ZLump * rec1 = (F7ZLump *)a;
-	F7ZLump * rec2 = (F7ZLump *)b;
-
-	return stricmp(rec1->FullName, rec2->FullName);
-}
 
 
 //==========================================================================
@@ -214,7 +207,7 @@ int STACK_ARGS F7ZFile::lumpcmp(const void * a, const void * b)
 //==========================================================================
 
 F7ZFile::F7ZFile(const char * filename, FileReader *filer)
-	: FResourceFile(filename, filer) 
+	: FResourceFile(filename, filer)
 {
 	Lumps = NULL;
 	Archive = NULL;
@@ -326,14 +319,13 @@ bool F7ZFile::Open(bool quiet)
 
 	if (!quiet) Printf(", %d lumps\n", NumLumps);
 
-	// Entries in archives are sorted alphabetically
-	qsort(&Lumps[0], NumLumps, sizeof(F7ZLump), lumpcmp);
+	PostProcessArchive(&Lumps[0], sizeof(F7ZLump));
 	return true;
 }
 
 //==========================================================================
 //
-// 
+//
 //
 //==========================================================================
 

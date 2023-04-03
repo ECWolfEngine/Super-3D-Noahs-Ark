@@ -22,7 +22,8 @@
 
 #include "wl_def.h"
 #include "wl_menu.h"
-#include "id_sd.h"
+#include "wl_net.h"
+#include "wl_play.h"
 #include "id_in.h"
 #include "id_vh.h"
 #include "id_us.h"
@@ -38,8 +39,6 @@
 //	Internal variables
 #define	ConfigVersion	1
 
-static	bool		US_Started;
-
 HighScore	Scores[MaxScores] =
 			{
 				{"Noah",10000,"1-2",""},
@@ -54,34 +53,6 @@ HighScore	Scores[MaxScores] =
 //	Internal routines
 
 //	Public routines
-
-///////////////////////////////////////////////////////////////////////////
-//
-//	US_Startup() - Starts the User Mgr
-//
-///////////////////////////////////////////////////////////////////////////
-void US_Startup()
-{
-	if (US_Started)
-		return;
-
-	US_Started = true;
-}
-
-
-///////////////////////////////////////////////////////////////////////////
-//
-//	US_Shutdown() - Shuts down the User Mgr
-//
-///////////////////////////////////////////////////////////////////////////
-void
-US_Shutdown(void)
-{
-	if (!US_Started)
-		return;
-
-	US_Started = false;
-}
 
 //	Window/Printing routines
 
@@ -113,7 +84,7 @@ void
 US_PrintUnsigned(longword n)
 {
 	char	buffer[32];
-	sprintf(buffer, "%lu", static_cast<long unsigned int> (n));
+	mysnprintf(buffer, 32, "%lu", static_cast<long unsigned int> (n));
 
 	US_Print(SmallFont, buffer);
 }
@@ -128,7 +99,7 @@ US_PrintSigned(int32_t n)
 {
 	char	buffer[32];
 
-	US_Print(SmallFont, ltoa(n,buffer,10));
+	US_Print(SmallFont, itoa(n,buffer,10));
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -182,8 +153,6 @@ US_CPrintLine(FFont *font, const char *s, EColorRange translation)
 
 	VW_MeasurePropString(font, s,w,h);
 
-	if (w > WindowW)
-		Quit("US_CPrintLine() - String exceeds width");
 	px = WindowX + ((WindowW - w) / 2);
 	py = PrintY;
 	VWB_DrawPropString(font, s, translation);
@@ -411,6 +380,9 @@ bool US_LineInput(FFont *font, int x,int y,char *buf,const char *def,bool escok,
 	ControlInfo ci;
 	Direction   lastdir = dir_None;
 
+	if(ingame)
+		Net::BlockPlaysim();
+
 	double clearx = x-1, cleary = y, clearw = maxwidth, clearh = font->GetHeight();
 	MenuToRealCoords(clearx, cleary, clearw, clearh, MENU_CENTER);
 
@@ -596,7 +568,7 @@ bool US_LineInput(FFont *font, int x,int y,char *buf,const char *def,bool escok,
 				case sc_Delete:
 					if (s[cursor])
 					{
-						strcpy(s + cursor,s + cursor + 1);
+						memmove(s + cursor,s + cursor + 1,strlen(s + cursor + 1) + 1);
 					}
 					c = key_None;
 					cursormoved = true;

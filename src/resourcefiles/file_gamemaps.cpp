@@ -36,6 +36,7 @@
 #include "doomerrors.h"
 #include "wl_def.h"
 #include "resourcefile.h"
+#include "tmemory.h"
 #include "w_wad.h"
 #include "m_swap.h"
 #include "zstring.h"
@@ -47,56 +48,67 @@ class FGamemaps : public FResourceFile
 {
 	public:
 		FGamemaps(const char* filename, FileReader *file);
-		FGamemaps(const char* filename, FileReader **file);
 		~FGamemaps();
 
 		FResourceLump *GetLump(int lump);
 		bool Open(bool quiet);
 
 	private:
-		FMapLump*	Lumps;
+		FMapLump* Lumps;
 
-		FString		extension;
-		FileReader	*mapheadReader;
+		TUniquePtr<FileReader> mapheadReader;
+		// Gamemaps = Carmack+RLEW, Maptemp = RLEW
+		bool carmacked;
 };
 
-FGamemaps::FGamemaps(const char* filename, FileReader *file) : FResourceFile(filename, file), Lumps(NULL)
+FGamemaps::FGamemaps(const char* filename, FileReader *file) : FResourceFile(filename, file), Lumps(NULL), mapheadReader(NULL)
 {
 	FString path(filename);
-	int lastSlash = path.LastIndexOfAny("/\\");
-	extension = path.Mid(lastSlash+10);
+	int lastSlash = path.LastIndexOfAny("/\\:");
+	int lastDot = path.LastIndexOf('.');
+	FString extension = path.Mid(lastDot+1);
+
+	carmacked = path.Mid(lastSlash+1, 7).CompareNoCase("maptemp") != 0;
+
 	path = path.Left(lastSlash+1);
 
-	File directory(path.Len() > 0 ? path : ".");
-	FString mapheadFile = path + directory.getInsensitiveFile(FString("maphead.") + extension, true);
-
-	mapheadReader = new FileReader();
-	if(!mapheadReader->Open(mapheadFile))
+	FString mapheadFile = FString("maphead.") + extension;
+	if(Wads.CheckIfWadLoaded(path.Left(lastSlash)) == -1)
 	{
-		delete mapheadReader;
-		mapheadReader = NULL;
+		File directory(path.Len() > 0 ? path : ".");
+		mapheadFile = path + directory.getInsensitiveFile(mapheadFile, true);
 
+		mapheadReader = new FileReader();
+		if(!mapheadReader->Open(mapheadFile))
+			mapheadReader.Reset();
+	}
+	else // Embedded vanilla data?
+	{
+		FLumpReader *lreader = reinterpret_cast<FLumpReader *>(file);
+
+		for(DWORD i = 0; i < lreader->LumpOwner()->LumpCount(); ++i)
+		{
+			FResourceLump *lump = lreader->LumpOwner()->GetLump(i);
+			if(lump->FullName.CompareNoCase(mapheadFile) == 0)
+			{
+				mapheadReader = lump->NewReader();
+				break;
+			}
+		}
+	}
+
+	if(!mapheadReader)
+	{
 		FString error;
 		error.Format("Could not open gamemaps since %s is missing.", mapheadFile.GetChars());
 		throw CRecoverableError(error);
 	}
 }
 
-FGamemaps::FGamemaps(const char* filename, FileReader **file) : FResourceFile(filename, file[0]), Lumps(NULL)
-{
-	FString path(filename);
-	int lastSlash = path.LastIndexOf(':');
-	extension = path.Mid(lastSlash+10);
-
-	mapheadReader = file[1];
-}
-
 FGamemaps::~FGamemaps()
 {
 	if(Lumps != NULL)
 		delete[] Lumps;
-
-	delete mapheadReader;
 }
 
 FResourceLump *FGamemaps::GetLump(int lump)
@@ -118,8 +130,12 @@ bool FGamemaps::Open(bool quiet)
 	mapheadReader->Read(&rlewTag, 2);
 	rlewTag = LittleShort(rlewTag);
 	mapheadReader->Read(offsets, NumPossibleMaps*4);
-	for(NumLumps = 0;NumLumps < NumPossibleMaps && offsets[NumLumps] != 0;++NumLumps)
+	for(NumLumps = 0;NumLumps < NumPossibleMaps;++NumLumps)
+	{
 		offsets[NumLumps] = LittleLong(offsets[NumLumps]);
+		if(offsets[NumLumps] == 0 || offsets[NumLumps] == 0xFFFFFFFFu)
+			break;
+	}
 
 	// We allocate 2 lumps per map so...
 	static const unsigned int NUM_MAP_LUMPS = 2;
@@ -132,8 +148,8 @@ bool FGamemaps::Open(bool quiet)
 		FMapLump &markerLump = Lumps[i*NUM_MAP_LUMPS];
 		// Hey we don't need to use a temporary name here!
 		// First map is MAP01 and so forth.
-		char lumpname[7];
-		sprintf(lumpname, "MAP%02d", i+1);
+		char lumpname[14];
+		mysnprintf(lumpname, 14, "MAP%02d", i+1);
 		markerLump.Owner = this;
 		markerLump.LumpNameSetup(lumpname);
 		markerLump.Namespace = ns_global;
@@ -142,6 +158,7 @@ bool FGamemaps::Open(bool quiet)
 		// Make the data lump
 		FMapLump &dataLump = Lumps[i*NUM_MAP_LUMPS+1];
 		dataLump.rlewTag = rlewTag;
+		dataLump.carmackCompressed = carmacked;
 		BYTE header[PLANES*6+20];
 		Reader->Seek(offsets[i], SEEK_SET);
 		Reader->Read(&header, PLANES*6+20);
@@ -167,20 +184,16 @@ bool FGamemaps::Open(bool quiet)
 FResourceFile *CheckGamemaps(const char *filename, FileReader *file, bool quiet)
 {
 	FString fname(filename);
-	int embeddedSep = fname.LastIndexOf(':');
-#ifdef _WIN32
-	if(embeddedSep == 1) embeddedSep = -1;
-#endif
-	int lastSlash = MAX<long>(fname.LastIndexOfAny("/\\"), embeddedSep);
+	int lastSlash = fname.LastIndexOfAny("/\\:");
 	if(lastSlash != -1)
 		fname = fname.Mid(lastSlash+1, 8);
 	else
 		fname = fname.Left(8);
 
-	if(fname.Len() == 8 && fname.CompareNoCase("gamemaps") == 0) // file must be gamemaps.something
+	// File must be gamemaps.something or maptemp.something
+	if(fname.Len() == 8 && (fname.CompareNoCase("gamemaps") == 0 || fname.Left(7).CompareNoCase("maptemp") == 0))
 	{
-		FResourceFile *rf = embeddedSep == -1 ? new FGamemaps(filename, file) :
-			new FGamemaps(filename, reinterpret_cast<FileReader**>(file)); // HACK
+		FResourceFile *rf = new FGamemaps(filename, file);
 		if(rf->Open(quiet)) return rf;
 		rf->Reader = NULL; // to avoid destruction of reader
 		delete rf;

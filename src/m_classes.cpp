@@ -300,7 +300,7 @@ void TextInputMenuItem::draw()
 }
 
 int ControlMenuItem::column = 0;
-const char* const ControlMenuItem::keyNames[512] =
+static const char* const KeyNames[512] =
 {
 	"?","?","?","?","?","?","?","?",                                //   0
 	"BkSp","Tab","?","?","?","Ret","?","?",                      //   8
@@ -343,6 +343,10 @@ const char* const ControlMenuItem::keyNames[512] =
 	"Shft","RCtl","Ctrl","RAlt","Alt","RMet","Meta","Supr",         // 304
 	"RSpr","Mode","Comp","Help","PrtS","Brk","Pwr","Euro",          // 312
 	"Undo","?"                                                      // 320
+};
+
+static const char* const MWheelNames[4] = {
+	"WhLt", "WhRt", "WhDn", "WhUp"
 };
 
 ControlMenuItem::ControlMenuItem(ControlScheme &button) : MenuItem(button.name), button(button)
@@ -391,12 +395,31 @@ void ControlMenuItem::activate()
 					break;
 				}
 
-				btn = IN_MouseButtons();
-				for(int i = 0;btn != 0 && i < 32;i++)
+				if((btn = IN_MouseButtons()))
 				{
-					if(btn & (1<<i))
+					for(int i = 0;btn != 0 && i < 32;i++)
 					{
-						ControlScheme::setMouse(controlScheme, button.button, i);
+						if(btn & (1<<i))
+						{
+							ControlScheme::setMouse(controlScheme, button.button, i);
+							exit = true;
+						}
+					}
+				}
+				else
+				{
+					if(MouseWheel[di_west])
+						btn = ControlScheme::MWheel_Left;
+					if(MouseWheel[di_east])
+						btn = ControlScheme::MWheel_Right;
+					if(MouseWheel[di_north])
+						btn = ControlScheme::MWheel_Up;
+					if(MouseWheel[di_south])
+						btn = ControlScheme::MWheel_Down;
+
+					if(btn)
+					{
+						ControlScheme::setMouse(controlScheme, button.button, btn);
 						exit = true;
 					}
 				}
@@ -469,26 +492,29 @@ void ControlMenuItem::draw()
 
 	const int key = SDL2Backconvert(button.keyboard);
 
-	if(button.keyboard >= 0 && button.keyboard < 512 && keyNames[key])
+	if(button.keyboard >= 0 && button.keyboard < 512 && KeyNames[key])
 	{
 		PrintX = 162;
-		US_Print(BigFont, keyNames[key], getTextColor());
+		US_Print(BigFont, KeyNames[key], getTextColor());
 	}
 	if(button.mouse != -1)
 	{
 		PrintX = 214;
-		char btn[8];
-		sprintf(btn, "MS%d", button.mouse);
+		FString btn;
+		if(button.mouse >= ControlScheme::MWheel_Left && button.mouse <= ControlScheme::MWheel_Up)
+			btn = MWheelNames[button.mouse - ControlScheme::MWheel_Left];
+		else
+			btn.Format("MS%d", button.mouse);
 		US_Print(BigFont, btn, getTextColor());
 	}
 	if(button.joystick != -1)
 	{
 		PrintX = 266;
-		char btn[8];
+		FString btn;
 		if(button.joystick < 32)
-			sprintf(btn, "JY%d", button.joystick);
+			btn.Format("JY%d", button.joystick);
 		else
-			sprintf(btn, "A%d%c", (button.joystick-32)/2, (button.joystick&1) ? 'D' : 'U');
+			btn.Format("A%d%c", (button.joystick-32)/2, (button.joystick&1) ? 'D' : 'U');
 		US_Print(BigFont, btn, getTextColor());
 	}
 
@@ -509,17 +535,23 @@ void ControlMenuItem::right()
 
 void Menu::drawGunHalfStep(int x, int y)
 {
-	VWB_DrawGraphic (cursor, x, y-2, MENU_CENTER);
-	VW_UpdateScreen ();
-	SD_PlaySound ("menu/move1");
-	SDL_Delay (8 * 100 / 7);
+	if(MenuStyle != MENUSTYLE_Blake)
+	{
+		VWB_DrawGraphic (cursor, x, y-2, MENU_CENTER);
+		VW_UpdateScreen ();
+		SD_PlaySound ("menu/move1");
+		SDL_Delay (TICS2MS(8));
+	}
 }
 
 void Menu::eraseGun(int x, int y)
 {
-	int gx = x, gy = y, gw = cursor->GetScaledWidth(), gh = cursor->GetScaledHeight();
-	MenuToRealCoords(gx, gy, gw, gh, MENU_CENTER);
-	VWB_Clear(BKGDCOLOR, gx, gy, gx+gw, gy+gh);
+	if(MenuStyle != MENUSTYLE_Blake)
+	{
+		int gx = x, gy = y, gw = cursor->GetScaledWidth(), gh = cursor->GetScaledHeight();
+		MenuToRealCoords(gx, gy, gw, gh, MENU_CENTER);
+		VWB_Clear(BKGDCOLOR, gx, gy, gx+gw, gy+gh);
+	}
 }
 
 Menu::Menu(int x, int y, int w, int indent, MENU_LISTENER_PROTOTYPE(entryListener)) :
@@ -557,8 +589,7 @@ void Menu::closeMenus(bool close)
 	if(close)
 	{
 		MenuFadeOut();
-		VWB_Clear(ColorMatcher.Pick(RPART(gameinfo.MenuFadeColor), GPART(gameinfo.MenuFadeColor), BPART(gameinfo.MenuFadeColor)),
-			0, 0, screenWidth, screenHeight);
+		VL_FadeClear();
 	}
 
 	Menu::close = close;
@@ -624,7 +655,7 @@ MenuItem *Menu::getIndex(int index) const
 
 void Menu::drawMenu() const
 {
-	if(cursor == NULL)
+	if(cursor == NULL && MenuStyle != MENUSTYLE_Blake)
 		cursor = TexMan("M_CURS1");
 
 	lastIndexDrawn = 0;
@@ -652,6 +683,16 @@ void Menu::drawMenu() const
 			lastIndexDrawn = i;
 		}
 		y += getIndex(i)->getHeight();
+	}
+
+	if(MenuStyle == MENUSTYLE_Blake)
+	{
+		double curx = getX() + getIndent() - 1;
+		double curw = getWidth() - getIndent() + 1;
+		double cury = selectedY;
+		double curh = getIndex(curPos)->getHeight();
+		MenuToRealCoords(curx, cury, curw, curh, MENU_CENTER);
+		VWB_Clear(MENUWIN_BACKGROUND, curx, cury, curx+curw, cury+curh);
 	}
 
 	// In order to draw the skill menu correctly we need to draw the selected option now
@@ -703,10 +744,11 @@ void Menu::draw() const
 			US_CPrint(BigFont, headText, gameinfo.FontColors[GameInfo::MENU_TITLE]);
 	}
 
-	DrawWindow(getX() - 8, getY() - 3, getWidth(), getHeight(), BKGDCOLOR);
+	if(MenuStyle != MENUSTYLE_Blake)
+		DrawWindow(getX() - 8, getY() - 3, getWidth(), getHeight(), BKGDCOLOR);
 	drawMenu();
 
-	if(!isAnimating() && countItems() > 0)
+	if(cursor && !isAnimating() && countItems() > 0)
 		VWB_DrawGraphic (cursor, x - 4, y + getHeight(curPos) - 2, MENU_CENTER);
 	VW_UpdateScreen ();
 }
@@ -716,7 +758,7 @@ int Menu::handle()
 	char key;
 	static int redrawitem = 1, lastitem = -1;
 	int x, y, basey, exit, shape;
-	uint32_t lastBlinkTime;
+	int32_t lastBlinkTime;
 	ControlInfo ci;
 
 	if(close)
@@ -749,7 +791,8 @@ int Menu::handle()
 			lastBlinkTime = GetTimeCount();
 			TexMan.UpdateAnimations(lastBlinkTime*14);
 
-			cursor = TexMan("M_CURS1");
+			if(MenuStyle != MENUSTYLE_Blake)
+				cursor = TexMan("M_CURS1");
 			draw();
 		}
 		else SDL_Delay(5);
@@ -1056,16 +1099,34 @@ void Menu::show()
 
 	if(countItems() == 0) // Do nothing.
 		return;
-	if(curPos >= (signed)countItems())
-		curPos = countItems()-1;
+	validateCurPos();
 
 	draw();
 	MenuFadeIn();
 	WaitKeyUp();
 
 	int item = 0;
-	while((item = handle()) != -1);
+	while((item = handle()) != -1) {}
 
 	if(!Menu::areMenusClosed())
 		MenuFadeOut ();
+}
+
+void Menu::validateCurPos()
+{
+	if(curPos >= (signed)countItems())
+		curPos = countItems()-1;
+
+	// If current item is disable try to move off it
+	const int oldCurPos = curPos;
+	while(!getIndex(curPos)->isEnabled() && curPos > 0)
+		--curPos;
+
+	// Reached top? Try searching downwards
+	if(curPos == 0 && !getIndex(0)->isEnabled())
+	{
+		curPos = oldCurPos+1;
+		while(!getIndex(curPos)->isEnabled() && curPos < (signed)countItems())
+			++curPos;
+	}
 }

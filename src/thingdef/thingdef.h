@@ -150,7 +150,9 @@ typedef TArray<ActionInfo *> ActionTable;
 class SymbolInfo
 {
 	public:
-		SymbolInfo(const ClassDef *cls, const FName &var, const int offset);
+		static const SymbolInfo *LookupSymbol(const ClassDef *cls, FName var);
+
+		SymbolInfo(const ClassDef *cls, const FName var, const int offset);
 
 		const ClassDef	* const cls;
 		const FName		var;
@@ -296,15 +298,18 @@ class ClassDef
 	protected:
 		friend class DObject;
 		friend class StateLabel;
+		friend class FDecorateParser;
 		static const size_t POINTER_END;
 
-		static void	ParseActor(Scanner &sc);
-		static void	ParseDecorateLump(int lumpNum);
 		static bool SetProperty(ClassDef *newClass, const char* className, const char* propName, Scanner &sc);
 
+		static void AddGlobalSymbol(Symbol *sym);
 		void		BuildFlatPointers();
 		const Frame *FindStateInList(const FName &stateName) const;
+		void		FinalizeActorClass();
+		bool		InitializeActorClass(bool isNative);
 		void		InstallStates(const TArray<StateDefinition> &stateDefs);
+		void		RegisterEdNum(unsigned int ednum);
 		const Frame *ResolveStateIndex(unsigned int index) const;
 
 		// We need to do this for proper initialization order.

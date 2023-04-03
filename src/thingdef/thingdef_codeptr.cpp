@@ -48,6 +48,7 @@
 #include "wl_agent.h"
 #include "wl_draw.h"
 #include "wl_game.h"
+#include "wl_net.h"
 #include "wl_play.h"
 #include "wl_state.h"
 
@@ -64,7 +65,7 @@ ActionInfo::ActionInfo(ActionPtr func, const FName &name) : func(func), name(nam
 	actionFunctions->Push(this);
 }
 
-int FunctionTableComp(const void *f1, const void *f2)
+static int FunctionTableComp(const void *f1, const void *f2)
 {
 	const ActionInfo * const func1 = *((const ActionInfo **)f1);
 	const ActionInfo * const func2 = *((const ActionInfo **)f2);
@@ -193,7 +194,7 @@ ACTION_FUNCTION(A_BossDeath)
 		if(!deathcam)
 		{
 			ADeathCam *dc = (ADeathCam*)AActor::Spawn(NATIVE_CLASS(DeathCam), 0, 0, 0, SPAWN_AllowReplacement);
-			dc->SetupDeathCam(self, players[0].mo);
+			dc->SetupDeathCam(self, self->target);
 		}
 		else
 		{
@@ -216,9 +217,12 @@ ACTION_FUNCTION(A_BossDeath)
 
 		if(deathcam && playstate == ex_stillplaying)
 		{
-			// Return the camera to the player if we're still going
-			players[0].camera = players[0].mo;
-			players[0].BringUpWeapon();
+			// Return the camera to the players if we're still going
+			for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
+			{
+				players[i].camera = players[i].mo;
+				players[i].BringUpWeapon();
+			}
 			gamestate.victoryflag = false;
 		}
 	}
@@ -336,7 +340,7 @@ ACTION_FUNCTION(A_Explode)
 			continue;
 		// Next see if we should damage the target
 		if(!(flags&XF_HURTSOURCE) &&
-			!(!!(self->flags & FL_PLAYERMISSILE) ^ (target == players[0].mo)))
+			!((self->target && self->target->player) ^ (!!target->player)))
 			continue;
 
 		double output = damage;
@@ -345,10 +349,7 @@ ACTION_FUNCTION(A_Explode)
 		if(output <= 0.0)
 			continue;
 
-		if(target->player)
-			TakeDamage(static_cast<int>(output), self);
-		else
-			DamageActor(target, static_cast<unsigned int>(output));
+		DamageActor(target, self->target, static_cast<unsigned int>(output));
 	}
 	return true;
 }
@@ -358,7 +359,7 @@ ACTION_FUNCTION(A_FaceTarget)
 	ACTION_PARAM_DOUBLE(max_turn, 0);
 	ACTION_PARAM_DOUBLE(max_pitch, 1);
 
-	A_Face(self, players[0].mo, angle_t(max_turn*ANGLE_45/45));
+	A_Face(self, self->target, angle_t(max_turn*ANGLE_45/45));
 	return true;
 }
 
@@ -372,7 +373,8 @@ ACTION_FUNCTION(A_GiveExtraMan)
 {
 	ACTION_PARAM_INT(amount, 0);
 
-	GiveExtraMan(amount);
+	if(self->player)
+		self->player->GiveExtraMan(amount);
 	return true;
 }
 
@@ -400,6 +402,8 @@ ACTION_FUNCTION(A_GunFlash)
 
 	ACTION_PARAM_STATE(flash, 0, self->player->ReadyWeapon->FindState(self->player->ReadyWeapon->mode != AWeapon::AltFire ? NAME_Flash : NAME_AltFlash));
 
+	if(self->MeleeState)
+		self->SetState(self->MeleeState);
 	self->player->SetPSprite(flash, player_t::ps_flash);
 	return true;
 }
@@ -470,7 +474,7 @@ ACTION_FUNCTION(A_JumpIfCloser)
 	if(self->player)
 		check = self->player->FindTarget();
 	else
-		check = players[0].mo;
+		check = self->target;
 
 	// << 6 - Adjusts to Doom scale
 	if(check && P_AproxDistance((self->x-check->x)<<6, (self->y-check->y)<<6) < (fixed)(distance*FRACUNIT))
@@ -530,12 +534,12 @@ ACTION_FUNCTION(A_MeleeAttack)
 	if(misssound.Compare("*") == 0)
 		misssound = hitsound;
 
-	A_Face(self, players[0].mo);
-	if(CheckMeleeRange(self, players[0].mo, self->speed))
+	A_Face(self, self->target);
+	if(CheckMeleeRange(self, self->target, self->speed))
 	{
 		if(pr_meleeattack() < static_cast<int>(accuracy*256))
 		{
-			TakeDamage(damage, self);
+			DamageActor(self->target, self, damage);
 			if(!hitsound.IsEmpty())
 				PlaySoundLocActor(hitsound, self);
 			return true;
@@ -552,7 +556,7 @@ ACTION_FUNCTION(A_MonsterRefire)
 	ACTION_PARAM_INT(probability, 0);
 	ACTION_PARAM_STATE(jump, 1, NULL);
 
-	AActor *target = players[0].mo;
+	AActor *target = self->target;
 	A_Face(self, target);
 
 	if(pr_monsterrefire() < probability)
@@ -562,7 +566,7 @@ ACTION_FUNCTION(A_MonsterRefire)
 		!(self->flags & FL_ATTACKMODE) ||
 		!target ||
 		target->health <= 0 ||
-		!CheckLine(self)
+		!CheckLine(self, target)
 	))
 	{
 		STATE_JUMP(jump);

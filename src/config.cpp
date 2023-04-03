@@ -43,6 +43,8 @@
 #include "scanner.h"
 #include "version.h"
 
+typedef TMap<FName, TUniquePtr<SettingsData> > SettingsMap;
+
 Config config;
 
 Config::Config() : firstRun(false)
@@ -51,9 +53,6 @@ Config::Config() : firstRun(false)
 
 Config::~Config()
 {
-	TMap<FName, SettingsData *>::Pair *pair;
-	for(TMap<FName, SettingsData *>::Iterator it(settings);it.NextPair(pair);)
-		delete pair->Value;
 }
 
 void Config::LocateConfigFile(int argc, char* argv[])
@@ -71,7 +70,7 @@ void Config::LocateConfigFile(int argc, char* argv[])
 
 	configDir = FileSys::GetDirectoryPath(FileSys::DIR_Configuration);
 
-#ifdef WINDOWS
+#ifdef _WIN32
 	configFile = configDir + "\\" BINNAME ".cfg";
 #else
 	configFile = configDir + "/" BINNAME ".cfg";
@@ -150,8 +149,8 @@ void Config::SaveConfig()
 	FILE *stream = File(configFile).open("wb");
 	if(stream)
 	{
-		TMap<FName, SettingsData *>::Pair *pair;
-		for(TMap<FName, SettingsData *>::Iterator it(settings);it.NextPair(pair);)
+		SettingsMap::Pair *pair;
+		for(SettingsMap::Iterator it(settings);it.NextPair(pair);)
 		{
 			fwrite(pair->Key, 1, strlen(pair->Key), stream);
 			if(ferror(stream))
@@ -165,7 +164,7 @@ void Config::SaveConfig()
 					intLength++;
 
 				char* value = new char[intLength + 7];
-				sprintf(value, " = %d;\n", data->GetInteger());
+				mysnprintf(value, intLength + 7, " = %d;\n", data->GetInteger());
 				fwrite(value, 1, strlen(value), stream);
 				delete[] value;
 				if(ferror(stream))
@@ -184,7 +183,7 @@ void Config::SaveConfig()
 				FString str = data->GetString(); // Make a non const copy of the string.
 				Scanner::Escape(str);
 				char* value = new char[str.Len() + 8];
-				sprintf(value, " = \"%s\";\n", str.GetChars());
+				mysnprintf(value, str.Len() + 8, " = \"%s\";\n", str.GetChars());
 				fwrite(value, 1, str.Len() + 7, stream);
 				delete[] value;
 				if(ferror(stream))
@@ -240,7 +239,7 @@ SettingsData *Config::GetSetting(const FName index)
 
 bool Config::FindIndex(const FName index, SettingsData *&data)
 {
-	SettingsData **setting = settings.CheckKey(index);
+	TUniquePtr<SettingsData> *setting = settings.CheckKey(index);
 	if(setting == NULL)
 		return false;
 	data = *setting;

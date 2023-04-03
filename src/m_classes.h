@@ -169,9 +169,8 @@ class TextInputMenuItem : public MenuItem
 class ControlMenuItem : public MenuItem
 {
 	protected:
-		ControlScheme				&button;
-		static int					column;
-		static const char* const	keyNames[512];
+		ControlScheme &button;
+		static int column;
 
 	public:
 		ControlMenuItem(ControlScheme &button);
@@ -242,6 +241,8 @@ class Menu
 		 * Should this menu show the Key, Mse. and Joy headers?
 		 */
 		void			showControlHeaders(bool show) { controlHeaders = show; }
+		void			validateCurPos();
+
 		MenuItem		*operator[] (int index) { return getIndex(index); }
 };
 

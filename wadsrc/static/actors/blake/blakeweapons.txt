@@ -1,0 +1,29 @@
+actor PlasmaGrenade : SmartAnimation
+{
+	seesound "plasmagrenade/fire"
+	deathsound "plasmagrenade/hit"
+	radius 10
+	speed 14
+	damage (random(40, 167))
+	PROJECTILE
+
+	action native A_PlasmaGrenadeCalcDuration();
+
+	states
+	{
+		Spawn:
+			GREN C 0 bright A_ScaleVelocity(frandom(1.0, 1.5))
+			GREN CCBABBCD 3.5 bright A_PlasmaGrenadeCalcDuration
+			GREN E 0 bright A_Scream
+			GREN E 0 bright A_Explode(random(50, 177), 128, 0)
+			GREN E 0 bright A_Stop
+			GREN E random(3, 6) bright A_InitSmartAnim(random(3, 6))
+			GREN FGH 3 bright A_SmartAnimDelay
+			stop
+		Death:
+			EXPL A 0 bright A_Explode(random(50, 177), 128, 0)
+			EXPL A random(1.5, 5) bright A_InitSmartAnim(random(3, 10))
+			EXPL BCDE 1.5 bright A_SmartAnimDelay
+			stop
+	}
+}

@@ -3,6 +3,8 @@
 
 #include "wl_def.h"
 #include "a_playerpawn.h"
+#include "id_vl.h"
+#include "tmemory.h"
 #include "weaponslots.h"
 
 /*
@@ -13,14 +15,10 @@
 =============================================================================
 */
 
-extern  int32_t  thrustspeed;
 extern  AActor   *LastAttacker;
 
-void    Cmd_Use ();
-void    Thrust (angle_t angle, int32_t speed);
-void    SpawnPlayer (int tilex, int tiley, int dir);
-void    TakeDamage (int points,AActor *attacker);
-void    GivePoints (int32_t points);
+void    CheckSpawnPlayer (bool setup=false);
+void    SpawnPlayer (int num);
 
 //
 // Status bar interface
@@ -33,6 +31,7 @@ public:
 	virtual void DrawStatusBar()=0;
 	virtual unsigned int GetHeight(bool top)=0;
 	virtual void NewGame() {}
+	virtual void Tick() {}
 	virtual void RefreshBackground(bool noborder=false);
 	virtual void UpdateFace (int damage=0) {}
 	virtual void WeaponGrin () {}
@@ -44,9 +43,8 @@ void	CreateStatusBar();
 // player state info
 //
 
-void    GiveExtraMan (int amount);
-void    CheckWeaponChange ();
-void    ControlMovement (AActor *self);
+void    CheckWeaponChange (AActor *self);
+void    ControlMovement (class APlayerPawn *self);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -69,11 +67,19 @@ extern class player_t
 
 		void	BobWeapon(fixed_t *x, fixed_t *y);
 		void	BringUpWeapon();
+		void	DeathFade();
+		void	DeathFadeClear();
 		AActor	*FindTarget();
+		inline unsigned int GetPlayerNum() const;
+		void	GiveExtraMan(int amount);
+		void	GivePoints(int32_t points);
 		size_t	PropagateMark();
 		void	Reborn();
 		void	Serialize(FArchive &arc);
 		void	SetPSprite(const Frame *frame, PSprite layer);
+		void	SetFOV(float newlyDesiredFOV);
+		void	AdjustFOV();
+		void	TakeDamage(int points, AActor *attacker);
 
 		enum State
 		{
@@ -104,10 +110,15 @@ extern class player_t
 		TObjPtr<AActor>	camera;
 		TObjPtr<AActor>	killerobj;
 
+		TUniquePtr<FFader> ScreenFader;
+
 		int32_t		oldscore,score,nextextra;
-		short		lives;
 		int32_t		health;
+		int32_t		frags;
+		short		lives;
 		float		FOV, DesiredFOV;
+
+		int32_t		thrustspeed;
 
 		FWeaponSlots	weapons;
 		AWeapon			*ReadyWeapon;
@@ -128,9 +139,15 @@ extern class player_t
 		bool		attackheld;
 		short		extralight;
 
+		int32_t		RespawnEligible;
 		int32_t		flags;
 		State		state;
 } players[];
+
+inline unsigned int player_t::GetPlayerNum() const
+{
+	return static_cast<unsigned int>(this - players);
+}
 
 FArchive &operator<< (FArchive &arc, player_t *&player);
 

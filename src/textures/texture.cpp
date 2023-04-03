@@ -42,9 +42,9 @@
 #include "bitmap.h"
 #include "colormatcher.h"
 #include "textures.h"
+#include "v_video.h"
 
 #define countof(x) (sizeof(x)/sizeof(x[0]))
-#define I_Error Quit
 
 typedef bool (*CheckFunc)(FileReader & file);
 typedef FTexture * (*CreateFunc)(FileReader & file, int lumpnum);
@@ -78,6 +78,8 @@ FTexture *FlatTexture_TryCreate(FileReader &, int lumpnum);
 FTexture *PatchTexture_TryCreate(FileReader &, int lumpnum);
 FTexture *EmptyTexture_TryCreate(FileReader &, int lumpnum);
 //FTexture *AutomapTexture_TryCreate(FileReader &, int lumpnum);
+FTexture *MacShapeTexture_TryCreate(FileReader &, int lumpnum);
+FTexture *PictTexture_TryCreate(FileReader &, int lumpnum);
 FTexture *WolfRawTexture_TryCreate(FileReader &, int lumpnum);
 FTexture *WolfShapeTexture_TryCreate(FileReader &, int lumpnum);
 
@@ -94,11 +96,14 @@ FTexture * FTexture::CreateTexture (int lumpnum, int usetype)
 		//{ PCXTexture_TryCreate,			TEX_Any },
 		//{ TGATexture_TryCreate,			TEX_Any },
 		{ RawPageTexture_TryCreate,		TEX_MiscPatch },
+		{ RawPageTexture_TryCreate,		TEX_WallPatch }, // Rott sky
 		//{ RottFlatTexture_TryCreate,	TEX_Flat },
 		{ FlatTexture_TryCreate,		TEX_Flat },
 		{ PatchTexture_TryCreate,		TEX_Any },
-		{ WolfShapeTexture_TryCreate,	TEX_Any },
+		{ WolfShapeTexture_TryCreate,	TEX_Sprite },
 		{ WolfRawTexture_TryCreate,		TEX_MiscPatch },
+		{ PictTexture_TryCreate,		TEX_MiscPatch },
+		{ MacShapeTexture_TryCreate,	TEX_Sprite },
 		{ EmptyTexture_TryCreate,		TEX_Any },
 		//{ AutomapTexture_TryCreate,		TEX_MiscPatch },
 	};
@@ -150,7 +155,10 @@ FTexture * FTexture::CreateTexture (int lumpnum, int usetype)
 FTexture * FTexture::CreateTexture (const char *name, int lumpnum, int usetype)
 {
 	FTexture *tex = CreateTexture(lumpnum, usetype);
-	if (tex != NULL && name != NULL) uppercopy(tex->Name, name);
+	if (tex != NULL && name != NULL) {
+		tex->Name = name;
+		tex->Name.ToUpper();
+	}
 	return tex;
 }
 
@@ -159,27 +167,29 @@ FTexture::FTexture (const char *name, int lumpnum)
 : LeftOffset(0), TopOffset(0),
   WidthBits(0), HeightBits(0), xScale(FRACUNIT), yScale(FRACUNIT), SourceLump(lumpnum),
   UseType(TEX_Any), bNoDecals(false), bNoRemap0(false), bWorldPanning(false),
-  bMasked(true), bAlphaTexture(false), bHasCanvas(false), bWarped(0), bComplex(false), bMultiPatch(false),
+  bMasked(true), bAlphaTexture(false), bHasCanvas(false), bWarped(0), bComplex(false), bMultiPatch(false), bKeepAround(false),
   Rotations(0xFFFF), SkyOffset(0), Width(0), Height(0), WidthMask(0)/*, Native(NULL)*/
 {
 	id.SetInvalid();
 	if (name != NULL)
 	{
-		uppercopy(Name, name);
+		Name = name;
+		Name.ToUpper();
 	}
 	else if (lumpnum < 0)
 	{
-		*Name = 0;
+		Name = FString();
 	}
 	else
 	{
 		Wads.GetLumpName (Name, lumpnum);
-		Name[8] = 0;
 	}
 }
 
 FTexture::~FTexture ()
 {
+	FTexture *link = Wads.GetLinkedTexture(SourceLump);
+	if (link == this) Wads.SetLinkedTexture(SourceLump, NULL);
 	//KillNative();
 }
 
@@ -539,10 +549,10 @@ void FTexture::FillBuffer(BYTE *buff, int pitch, int height, FTextureFormat fmt)
 
 int FTexture::CopyTrueColorPixels(FBitmap *bmp, int x, int y, int rotate, FCopyInfo *inf)
 {
-	/*PalEntry *palette = screen->GetPalette();
+	PalEntry *palette = screen->GetPalette();
 	for(int i=1;i<256;i++) palette[i].a = 255;	// set proper alpha values
 	bmp->CopyPixelData(x, y, GetPixels(), Width, Height, Height, 1, rotate, palette, inf);
-	for(int i=1;i<256;i++) palette[i].a = 0;*/
+	for(int i=1;i<256;i++) palette[i].a = 0;
 	return 0;
 }
 
@@ -585,7 +595,6 @@ FDummyTexture::FDummyTexture ()
 	HeightBits = 6;
 	WidthBits = 6;
 	WidthMask = 63;
-	Name[0] = 0;
 	UseType = TEX_Null;
 }
 

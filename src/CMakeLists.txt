@@ -1,188 +1,23 @@
-if(COMMAND cmake_policy)
-	cmake_policy(SET CMP0003 NEW)
-endif(COMMAND cmake_policy)
-
-get_target_property( UPDATEREVISION_EXE updaterevision LOCATION )
-
+# Update gitinfo.h
 add_custom_target(revision_check ALL
-	COMMAND ${UPDATEREVISION_EXE} . ${CMAKE_CURRENT_SOURCE_DIR}/svnrevision.h
+	COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/tools/updaterevision/UpdateRevision.cmake" "${CMAKE_CURRENT_BINARY_DIR}/gitinfo.h"
 	WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-	DEPENDS updaterevision
 )
 
-set(PLATFORM_EXE_FLAGS "")
-
-include(CheckCXXSourceCompiles)
-include(CheckFunctionExists)
-include(FindPkgConfig)
-
-include_directories(
-	${ECWolf_SOURCE_DIR}/src
-	${ECWolf_SOURCE_DIR}/src/g_shared
-	${LZMA_INCLUDE_DIR}
-	${ECWolf_SOURCE_DIR}/gdtoa
-	${CMAKE_BINARY_DIR}/gdtoa
-)
-
-if(GPL)
-	add_definitions(-DUSE_GPL)
-	set(OPL_SOURCES dosbox/dbopl.cpp)
-
-	if(USE_LIBTEXTSCREEN)
-		add_definitions(-DUSE_TEXTSCREEN)
-		include_directories(${ECWolf_SOURCE_DIR}/textscreen)
-		set(EXTRA_LIBRARIES textscreen)
-	else(USE_LIBTEXTSCREEN)
-		set(EXTRA_LIBRARIES)
-	endif(USE_LIBTEXTSCREEN)
-else(GPL)
-	set(OPL_SOURCES mame/fmopl.cpp)
-	set(EXTRA_LIBRARIES)
-endif(GPL)
-
-find_package(SDL REQUIRED)
-find_package(SDL_mixer REQUIRED)
-# Noah3D - No jpeg
-include_directories(${SDLMIXER_INCLUDE_DIR} ${SDL_INCLUDE_DIR} ${ZLIB_INCLUDE_DIR} ${BZIP2_INCLUDE_DIR})
-
-check_function_exists(stricmp STRICMP_EXISTS)
-check_function_exists(strnicmp STRNICMP_EXISTS)
-check_function_exists(atoll ATOLL_EXISTS)
-if(NOT STRICMP_EXISTS)
-	add_definitions(-Dstricmp=strcasecmp)
-endif(NOT STRICMP_EXISTS)
-if(NOT STRNICMP_EXISTS)
-	add_definitions(-Dstrnicmp=strncasecmp)
-endif(NOT STRNICMP_EXISTS)
-if(NOT ATOLL_EXISTS)
-	add_definitions(-Datoll=_atoi64)
-endif(NOT ATOLL_EXISTS)
-
-check_cxx_source_compiles(
-	"#include <stdarg.h>
-	int main() { va_list list1, list2; va_copy(list1, list2); return 0; }"
-	HAS_VA_COPY )
-if( NOT HAS_VA_COPY )
-	check_cxx_source_compiles(
-		"#include <stdarg.h>
-		int main() { va_list list1, list2; __va_copy(list1, list2); return 0; }"
-		HAS___VA_COPY )
-	if( HAS___VA_COPY )
-		add_definitions( -Dva_copy=__va_copy )
-	else( HAS___VA_COPY )
-		add_definitions( -DNO_VA_COPY )
-	endif( HAS___VA_COPY )
-endif( NOT HAS_VA_COPY )
-
-if( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" )
-	set( CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused -Wno-unused-parameter -Wno-missing-field-initializers ${CMAKE_CXX_FLAGS}" )
-endif( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" )
-
-if(WIN32)
-	set(NO_GTK ON)
-	set(EXTRA_LIBRARIES ${EXTRA_LIBRARIES} comctl32)
-	add_definitions(-DWINDOWS -DNO_STDIO_REDIRECT)
-
-	# RC file
-	if(CMAKE_COMPILER_IS_GNUCXX)
-		add_custom_command(
-			OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/windows.o
-			COMMAND windres -o ${CMAKE_CURRENT_BINARY_DIR}/windows.o -i ${ECWolf_SOURCE_DIR}/src/win32/windows.rc
-			WORKING_DIRECTORY ${ECWolf_SOURCE_DIR}/src/win32
-			COMMENT "Generating windows resources (windows.rc)"
-		)
-
-		set(EXTRA_FILES windows.o)
-	else(CMAKE_COMPILER_IS_GNUCXX)
-		set(EXTRA_FILES ${ECWolf_SOURCE_DIR}/src/win32/windows.rc)
-	endif(CMAKE_COMPILER_IS_GNUCXX)
-
-	# Fix stat in v140_xp (broken in RTM and Update 1 so far)
-	if( MSVC AND MSVC_VERSION EQUAL 1900 AND CMAKE_GENERATOR_TOOLSET STREQUAL "v140_xp" )
-		add_definitions(-D_stat64i32=VS14Stat)
-		set(EXTRA_FILES ${EXTRA_FILES} win32/vs2015hack.cpp)
-	endif( MSVC AND MSVC_VERSION EQUAL 1900 AND CMAKE_GENERATOR_TOOLSET STREQUAL "v140_xp" )
-
-	set(PLATFORM_EXE_FLAGS WIN32)
-
-	set(EXTRA_FILES
-		${EXTRA_FILES}
-		win32/i_crash.cpp
-		win32/i_main.cpp
-		win32/wl_iwad_win32.cpp
-	)
-elseif(APPLE OR ANDROID)
-	set(NO_GTK ON)
-else(WIN32)
-	option( NO_GTK "Disable GTK+ dialogs (Not applicable to Windows)" ON )
-
-	# Use GTK+ for the IWAD picker, if available.
-	if( NOT NO_GTK )
-		pkg_check_modules( GTK2 gtk+-2.0 )
-		if( GTK2_FOUND )
-			set( EXTRA_LIBRARIES ${EXTRA_LIBRARIES} ${GTK2_LIBRARIES} )
-			include_directories( ${GTK2_INCLUDE_DIRS} )
-		else( GTK2_FOUND )
-			set( NO_GTK ON )
-		endif( GTK2_FOUND )
-	endif( NOT NO_GTK )
-endif(WIN32)
-
-if(NO_GTK)
-	add_definitions(-DNO_GTK=1)
-endif(NO_GTK)
-
-if(APPLE)
-	set(EXTRA_FILES
-		macosx/filesys.mm
-		macosx/wl_iwad_picker_cocoa.mm
-	)
-
-	if(${SDL_VERSION_STRING} VERSION_LESS "2.0.0")
-		set(EXTRA_FILES ${EXTRA_FILES} macosx/SDLMain.m)
+# The ability to start with an empty target was added in CMake 3.11 so since
+# for Android we use a shared library we need to use a macro to determine which
+# function to call.
+macro(initial_sources TARGET)
+	if(ANDROID)
+		add_library(engine SHARED ${ARGV})
+	else()
+		add_executable(engine WIN32 ${ARGV})
 	endif()
+endmacro()
 
-	include(${CMAKE_CURRENT_SOURCE_DIR}/macosx/install.txt)
-
-	option(BUILD_BUNDLE "Build a app bundle on Mac OS X" OFF)
-	if(BUILD_BUNDLE)
-		set(PLATFORM_EXE_FLAGS MACOSX_BUNDLE)
-	endif(BUILD_BUNDLE)
-elseif(ANDROID)
-	set(EXTRA_FILES
-		android/android-jni.cpp
-		android/in_android.cpp
-		android/wl_iwad_picker_android.cpp
-	)
-
-	include_directories(${TOUCHCONTROLS_INCLUDE_DIR} ${SIGCPP_INCLUDE_DIR} ${TINYXML_INCLUDE_DIR} ${LIBPNG_INCLUDE_DIR})
-
-	set(EXTRA_LIBRARIES ${EXTRA_LIBRARIES} ${TOUCHCONTROLS_LIBRARY} log)
-endif(APPLE)
-
-# Steamworks for S3DNA
-set(STEAMWORKS_INCLUDE_DIR "" CACHE PATH "Path to SteamWorks include directory.")
-set(STEAMWORKS_LIBRARY "" CACHE FILEPATH "SteamWorks library.")
-if(STEAMWORKS_LIBRARY)
-	include_directories(${STEAMWORKS_INCLUDE_DIR})
-	set(EXTRA_LIBRARIES ${EXTRA_LIBRARIES} ${STEAMWORKS_LIBRARY})
-else()
-	add_definitions(-DNO_STEAMWORKS)
-endif()
-
-# Glob for the header files so project generation can include them
-file(GLOB HEADER_FILES
-	g_shared/*.h
-	g_wolf/*.h
-	r_data/*.h
-	resourcefiles/*.h
-	sfmt/*.h
-	textures/*.h
-	thingdef/*.h
-	*.h
-)
-
-set(SOURCE_FILES
+initial_sources(
+	g_blake/a_smartanim.cpp
+	g_blake/blake_sbar.cpp
 	g_shared/a_deathcam.cpp
 	g_shared/a_inventory.cpp
 	g_shared/a_keys.cpp
@@ -226,8 +61,10 @@ set(SOURCE_FILES
 	textures/flattexture.cpp
 	#textures/imgztexture.cpp
 	#textures/jpegtexture.cpp Noah3D - No jpeg
+	textures/machudtexture.cpp
 	textures/multipatchtexture.cpp
 	textures/patchtexture.cpp
+	textures/picttexture.cpp
 	#textures/pcxtexture.cpp
 	textures/pngtexture.cpp
 	textures/rawpagetexture.cpp
@@ -242,6 +79,7 @@ set(SOURCE_FILES
 	thingdef/thingdef.cpp
 	thingdef/thingdef_codeptr.cpp
 	thingdef/thingdef_expression.cpp
+	thingdef/thingdef_parse.cpp
 	thingdef/thingdef_properties.cpp
 	thingdef/thingdef_type.cpp
 	actor.cpp
@@ -262,9 +100,11 @@ set(SOURCE_FILES
 	gamemap.cpp
 	gamemap_planes.cpp
 	gamemap_uwmf.cpp
+	gitinfo.cpp
 	id_ca.cpp
 	id_in.cpp
 	id_sd.cpp
+	id_sd_n3dmus.cpp
 	id_us_1.cpp
 	id_vh.cpp
 	id_vl.cpp
@@ -296,6 +136,7 @@ set(SOURCE_FILES
 	wl_atmos.cpp
 	wl_cloudsky.cpp
 	wl_debug.cpp
+	wl_dir3dspr.cpp
 	wl_draw.cpp
 	wl_floorceiling.cpp
 	wl_game.cpp
@@ -304,6 +145,7 @@ set(SOURCE_FILES
 	wl_loadsave.cpp
 	wl_main.cpp
 	wl_menu.cpp
+	wl_net.cpp
 	wl_parallax.cpp
 	wl_play.cpp
 	wl_state.cpp
@@ -312,35 +154,221 @@ set(SOURCE_FILES
 	zstring.cpp
 )
 
-if(NOT ANDROID)
-	add_executable(noah3d ${PLATFORM_EXE_FLAGS}
-		${HEADER_FILES}
-		${OPL_SOURCES}
-		${SOURCE_FILES}
-		${EXTRA_FILES}
+if(ANDROID)
+	# On Android we build a shared object so create a dummy program so we can
+	# get link errors.
+	add_executable(link-test android/link-test.cpp)
+	# Link SDL2::SDL2 explicitly here since Aarch64 linker seems to be setup
+	# improperly.
+	target_link_libraries(link-test PRIVATE engine SDL2::SDL2)
+endif()
+
+include(CheckCXXSourceCompiles)
+include(CheckFunctionExists)
+include(FindPkgConfig)
+
+if(GPL)
+	target_compile_definitions(engine PRIVATE -DUSE_GPL)
+	target_sources(engine PRIVATE dosbox/dbopl.cpp)
+
+	if(USE_LIBTEXTSCREEN)
+		target_compile_definitions(engine PRIVATE -DUSE_TEXTSCREEN)
+		target_link_directories(engine PRIVATE textscreen)
+	endif()
+else()
+	target_sources(engine PRIVATE mame/fmopl.cpp)
+endif()
+
+check_function_exists(stricmp STRICMP_EXISTS)
+check_function_exists(strnicmp STRNICMP_EXISTS)
+check_function_exists(atoll ATOLL_EXISTS)
+if(NOT STRICMP_EXISTS)
+	target_compile_definitions(engine PRIVATE -Dstricmp=strcasecmp)
+endif()
+if(NOT STRNICMP_EXISTS)
+	target_compile_definitions(engine PRIVATE -Dstrnicmp=strncasecmp)
+endif()
+if(NOT ATOLL_EXISTS)
+	target_compile_definitions(engine PRIVATE -Datoll=_atoi64)
+endif()
+
+check_cxx_source_compiles(
+	"#include <stdarg.h>
+	int main() { va_list list1, list2; va_copy(list1, list2); return 0; }"
+	HAS_VA_COPY )
+if( NOT HAS_VA_COPY )
+	check_cxx_source_compiles(
+		"#include <stdarg.h>
+		int main() { va_list list1, list2; __va_copy(list1, list2); return 0; }"
+		HAS___VA_COPY )
+	if( HAS___VA_COPY )
+		target_compile_definitions(engine PRIVATE -Dva_copy=__va_copy)
+	else()
+		target_compile_definitions(engine PRIVATE -DNO_VA_COPY)
+	endif()
+endif()
+
+if( ZD_CMAKE_COMPILER_IS_GNUCXX_COMPATIBLE )
+	if( CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 8.0 )
+		# Remove after switching to C++11
+		target_compile_options(engine PRIVATE -Wno-class-memaccess)
+	endif()
+	if( CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0 )
+		target_compile_options(engine PRIVATE -Wno-implicit-fallthrough)
+	endif()
+	if( CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.4 )
+		target_compile_options(engine PRIVATE -Wno-unused-result)
+	endif()
+	target_compile_options(engine PRIVATE -Wall -Wextra -Wno-unused -Wno-unused-parameter -Wno-missing-field-initializers)
+endif()
+
+if(WIN32)
+	set(NO_GTK ON)
+	target_link_libraries(engine PRIVATE comctl32)
+	target_compile_definitions(engine PRIVATE -DNO_STDIO_REDIRECT)
+
+	# RC file
+	target_sources(engine PRIVATE win32/windows.rc)
+
+	# Fix stat in v140_xp (broken in RTM and Update 1 so far)
+	if( MSVC AND MSVC_VERSION EQUAL 1900 AND CMAKE_GENERATOR_TOOLSET STREQUAL "v140_xp" )
+		target_compile_definitions(engine PRIVATE -D_stat64i32=VS14Stat)
+		target_sources(engine PRIVATE win32/vs2015hack.cpp)
+	endif()
+
+	target_sources(engine PRIVATE
+		win32/i_crash.cpp
+		win32/i_main.cpp
+		win32/wl_iwad_win32.cpp
 	)
-else(NOT ANDROID)
-	add_library(noah3d SHARED
-		${HEADER_FILES}
-		${OPL_SOURCES}
-		${SOURCE_FILES}
-		${EXTRA_FILES}
+elseif(APPLE OR ANDROID)
+	set(NO_GTK ON)
+else()
+	option( NO_GTK "Disable GTK+ dialogs (Not applicable to Windows)" ON )
+
+	# Use GTK+ for the IWAD picker, if available.
+	if( NOT NO_GTK )
+		pkg_check_modules( GTK3 gtk+-3.0 )
+		if( GTK3_FOUND )
+			target_link_libraries(engine PRIVATE ${GTK3_LIBRARIES})
+			target_include_directories(engine PRIVATE ${GTK3_INCLUDE_DIRS})
+		else()
+			set( NO_GTK ON )
+		endif()
+	endif()
+
+	target_sources(engine PRIVATE posix/i_main.cpp)
+endif()
+
+if(NO_GTK)
+	target_compile_definitions(engine PRIVATE -DNO_GTK=1)
+endif()
+
+if(APPLE)
+	target_sources(engine PRIVATE
+		macosx/filesys.mm
+		macosx/i_main.mm
+		macosx/wl_iwad_picker_cocoa.mm
 	)
 
-	# Link test
-	add_executable(link-test android/link-test.c)
-	target_link_libraries(link-test noah3d)
-endif(NOT ANDROID)
+	include(${CMAKE_CURRENT_SOURCE_DIR}/macosx/install.cmake)
 
-add_dependencies(noah3d lzma gdtoa revision_check)
-# Noah3D - No jpeg
-target_link_libraries(noah3d ${EXTRA_LIBRARIES} ${SDL_LIBRARY} ${SDLMIXER_LIBRARY} ${ZLIB_LIBRARY} ${BZIP2_LIBRARIES} lzma gdtoa)
-set_target_properties(noah3d PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_DIR})
+	option(BUILD_BUNDLE "Build a app bundle on Mac OS X" ON)
+	if(BUILD_BUNDLE)
+		set_target_properties(engine PROPERTIES
+			MACOSX_BUNDLE ON
+			MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/macosx/Info.plist.in"
+			MACOSX_BUNDLE_BUNDLE_NAME "${PRODUCT_NAME}"
+			MACOSX_BUNDLE_GUI_IDENTIFIER "${PRODUCT_IDENTIFIER}"
+			MACOSX_BUNDLE_BUNDLE_VERSION "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
+			MACOSX_BUNDLE_LONG_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
+			MACOSX_BUNDLE_SHORT_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
+		)
+	endif(BUILD_BUNDLE)
+elseif(ANDROID)
+	target_sources(engine PRIVATE
+		android/android-jni.cpp
+		android/in_android.cpp
+		android/wl_iwad_picker_android.cpp
+	)
+
+	# Aarch64 linker seems to be setup improperly and requires these to be
+ 	# public for link-test
+	target_link_libraries(engine PUBLIC
+		touchcontrols
+		GLESv1_CM
+		log
+	)
+endif()
+
+# Derive version info and generate header
+string(TOUPPER "${PRODUCT_NAME}" PRODUCT_SIGNATURE)
+string(TOLOWER "${PRODUCT_NAME}" PRODUCT_BINARY)
+math(EXPR VERSION_INTEGER "(${VERSION_MAJOR}<<20) | (${VERSION_MINOR}<<8) | ${VERSION_PATCH}")
+configure_file(versiondefs.h.in versiondefs.h)
+
+# Glob for the header files so project generation can include them
+file(GLOB HEADER_FILES
+	g_shared/*.h
+	g_wolf/*.h
+	r_data/*.h
+	resourcefiles/*.h
+	sfmt/*.h
+	textures/*.h
+	thingdef/*.h
+	*.h
+)
+list(APPEND HEADER_FILES ${CMAKE_CURRENT_BINARY_DIR}/versiondefs.h)
+target_sources(engine PRIVATE ${HEADER_FILES})
+
+add_dependencies(engine revision_check)
+target_link_libraries(engine PRIVATE
+	SDL2_mixer::SDL2_mixer
+	SDL2_net::SDL2_net
+	SDL2::SDL2
+	${BZIP2_LIBRARIES}
+	#${JPEG_LIBRARIES}
+	lzma
+	gdtoa
+	ZLIB::ZLIB
+)
+target_include_directories(engine PRIVATE
+	${BZIP2_INCLUDE_DIR}
+	#${JPEG_INCLUDE_DIR}
+	${CMAKE_CURRENT_BINARY_DIR}
+	${CMAKE_CURRENT_SOURCE_DIR}
+	${CMAKE_CURRENT_SOURCE_DIR}/g_shared
+)
+
+set_target_properties(engine PROPERTIES
+	CXX_STANDARD 98
+	OUTPUT_NAME "${ENGINE_BINARY_NAME}"
+	RUNTIME_OUTPUT_DIRECTORY "${OUTPUT_DIR}"
+	# On Linux look for any libraries we link against in the executable directory.
+	INSTALL_RPATH "\$ORIGIN"
+	BUILD_WITH_INSTALL_RPATH ON
+)
+
+# Steamworks for S3DNA
+set(STEAMWORKS_INCLUDE_DIR "" CACHE PATH "Path to SteamWorks include directory.")
+set(STEAMWORKS_LIBRARY "" CACHE FILEPATH "SteamWorks library.")
+if(STEAMWORKS_LIBRARY)
+	target_include_directories(engine PRIVATE ${STEAMWORKS_INCLUDE_DIR})
+	target_link_libraries(engine PRIVATE ${STEAMWORKS_LIBRARY})
+else()
+	target_compile_definitions(engine PRIVATE NO_STEAMWORKS)
+endif()
 
 # Install
 if(NOT ANDROID)
-	install(TARGETS noah3d BUNDLE DESTINATION ${OUTPUT_DIR} RUNTIME DESTINATION bin COMPONENT Runtime)
-endif(NOT ANDROID)
+	install(TARGETS engine BUNDLE DESTINATION ${OUTPUT_DIR} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT Runtime)
+
+	if(NOT WIN32 AND NOT APPLE)
+		configure_file(posix/engine.desktop.in posix/engine.desktop)
+		install(FILES "${CMAKE_CURRENT_BINARY_DIR}/posix/engine.desktop" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications" RENAME "${ENGINE_BINARY_NAME}.desktop")
+		install(FILES "posix/icon.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps" RENAME "${ENGINE_BINARY_NAME}.svg")
+	endif()
+endif()
 
 # Project file source groupings
 source_group("Sources" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/.+")

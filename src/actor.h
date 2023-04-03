@@ -98,6 +98,8 @@ class AActor : public Thinker,
 		void			AddInventory(AInventory *item);
 		virtual void	BeginPlay() {}
 		void			ClearCounters();
+		void			ClearInventory();
+		bool			CheckVisibility(const AActor *check, angle_t fov=ANGLE_45) const;
 		virtual void	Destroy();
 		virtual void	Die();
 		void			EnterZone(const MapZone *zone);
@@ -109,13 +111,19 @@ class AActor : public Thinker,
 		DropList		*GetDropList() const;
 		const MapZone	*GetZone() const { return soundZone; }
 		bool			GiveInventory(const ClassDef *cls, int amount=0, bool allowreplacement=true);
+		bool			InStateSequence(const Frame *basestate) const;
 		bool			IsFast() const;
+		virtual void	LevelSpawned() {}
 		virtual void	PostBeginPlay() {}
 		void			RemoveFromWorld();
 		virtual void	RemoveInventory(AInventory *item);
 		void			Serialize(FArchive &arc);
+		void			SetIdle();
 		void			SetState(const Frame *state, bool norun=false);
+		void			SpawnFog();
 		static AActor	*Spawn(const ClassDef *type, fixed x, fixed y, fixed z, int flags);
+		int32_t			SpawnHealth() const;
+		bool			Teleport(fixed x, fixed y, angle_t angle, bool nofog=false);
 		virtual void	Tick();
 		virtual void	Touch(AActor *toucher) {}
 
@@ -158,6 +166,7 @@ class AActor : public Thinker,
 #endif
 		};
 #pragma pack(pop)
+		fixed z;
 		fixed	velx, vely;
 
 		angle_t	angle;
@@ -192,6 +201,7 @@ class AActor : public Thinker,
 		short       temp1,hidden;
 		fixed		killerx,killery; // For deathcam
 
+		TObjPtr<AActor> target;
 		player_t	*player;	// Only valid with APlayerPawn
 
 		TObjPtr<AInventory>	inventory;

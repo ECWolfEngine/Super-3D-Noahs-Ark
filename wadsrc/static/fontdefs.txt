@@ -22,3 +22,17 @@ HudFont
 	Base 32
 	SpaceWidth 8
 }
+
+BlakeHealthFont
+{
+	Template "STFNG%03d"
+	First 32
+	Base 32
+}
+
+BlakeScoreFont
+{
+	Template "STFNA%03d"
+	First 32
+	Base 32
+}

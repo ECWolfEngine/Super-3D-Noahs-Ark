@@ -68,6 +68,7 @@ extern class ThinkerList
 		void	DestroyAll(Priority start=FIRST_TICKABLE);
 		void	Serialize(FArchive &arc);
 		void	Tick();
+		void	Tick(Priority list);
 
 		void	MarkRoots();
 	protected:
@@ -80,7 +81,7 @@ extern class ThinkerList
 		// think, but end up being destroyed.
 		Iterator					nextThinker;
 		EmbeddedList<Thinker>::List	thinkers[NUM_TYPES];
-} *thinkerList;
+} thinkerList;
 
 class Thinker : public DObject, public EmbeddedList<Thinker>::Node
 {

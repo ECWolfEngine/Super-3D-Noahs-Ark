@@ -67,6 +67,7 @@ class APlayerPawn : public AActor
 		void		CheckWeaponSwitch(const ClassDef *ammo);
 		void		Die();
 		DropList	*GetStartInventory();
+		void		GiveDeathmatchInventory();
 		void		GiveStartingInventory();
 		AWeapon		*PickNewWeapon();
 		void		RemoveInventory(AInventory *item);
@@ -85,6 +86,9 @@ class APlayerPawn : public AActor
 
 	protected:
 		AWeapon	*BestWeapon(const ClassDef *ammo=NULL);
+
+		void Cmd_Use();
+		void DeathTick();
 };
 
 #endif

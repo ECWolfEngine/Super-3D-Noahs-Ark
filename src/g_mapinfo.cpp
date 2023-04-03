@@ -31,7 +31,7 @@
 **
 **
 */
- 
+
 #include "gamemap.h"
 #include "g_intermission.h"
 #include "g_mapinfo.h"
@@ -58,6 +58,8 @@ public:
 	MapInfoBlockParser(Scanner &sc, const char* block) : sc(sc), block(block)
 	{
 	}
+
+	virtual ~MapInfoBlockParser() {}
 
 	void Parse()
 	{
@@ -209,6 +211,7 @@ protected:
 
 	void ParseStringArrayAssignment(TArray<FString> &dest)
 	{
+		dest.Clear();
 		sc.MustGetToken('=');
 		do
 		{
@@ -270,7 +273,8 @@ private:
 static LevelInfo defaultMap;
 static TArray<LevelInfo> levelInfos;
 
-LevelInfo::LevelInfo() : UseMapInfoName(false)
+LevelInfo::LevelInfo() : ResetHealth(false), ResetInventory(false),
+	UseMapInfoName(false)
 {
 	MapName[0] = 0;
 	TitlePatch.SetInvalid();
@@ -293,6 +297,9 @@ LevelInfo::LevelInfo() : UseMapInfoName(false)
 	SpawnWithWeaponRaised = false;
 	ForceTally = false;
 	HighScoresGraphic.SetInvalid();
+	Sky.SetInvalid();
+	SkyScrollSpeed = 0.0;
+	SkyHorizonOffset = 0;
 }
 
 FTextureID LevelInfo::GetBorderTexture() const
@@ -301,6 +308,13 @@ FTextureID LevelInfo::GetBorderTexture() const
 	if(!BorderTexture.isValid())
 		return BorderFlat;
 	return BorderTexture;
+}
+
+FString LevelInfo::GetMusic(const GameMap *gm) const
+{
+	if(gm->GetHeader().music.IsNotEmpty())
+		return gm->GetHeader().music;
+	return Music;
 }
 
 FString LevelInfo::GetName(const GameMap *gm) const
@@ -530,6 +544,10 @@ protected:
 			mapInfo.NoIntermission = true;
 		else if(key.CompareNoCase("Par") == 0)
 			ParseIntAssignment(mapInfo.Par);
+		else if(key.CompareNoCase("ResetHealth") == 0)
+			mapInfo.ResetHealth = true;
+		else if(key.CompareNoCase("ResetInventory") == 0)
+			mapInfo.ResetInventory = true;
 		else if(key.CompareNoCase("SecretDeathSounds") == 0)
 			ParseBoolAssignment(mapInfo.SecretDeathSounds);
 		else if(key.CompareNoCase("SpawnWithWeaponRaised") == 0)
@@ -542,6 +560,26 @@ protected:
 		}
 		else if(key.CompareNoCase("Translator") == 0)
 			ParseStringAssignment(mapInfo.Translator);
+		else if(key.CompareNoCase("Sky1") == 0)
+		{
+			FString texName;
+			ParseStringAssignment(texName);
+			mapInfo.Sky = TexMan.CheckForTexture(texName, FTexture::TEX_Wall);
+
+			if(sc.CheckToken(','))
+			{
+				bool negative = sc.CheckToken('-');
+				sc.MustGetToken(TK_FloatConst);
+				mapInfo.SkyScrollSpeed = negative ? -sc->decimal : sc->decimal;
+
+				if(sc.CheckToken(','))
+				{
+					negative = sc.CheckToken('-');
+					sc.MustGetToken(TK_IntConst);
+					mapInfo.SkyHorizonOffset = negative ? -sc->number : sc->number;
+				}
+			}
+		}
 		else
 			return false;
 		return true;
@@ -551,6 +589,10 @@ protected:
 ////////////////////////////////////////////////////////////////////////////////
 
 GameInfo gameinfo;
+
+GameInfo::GameInfo() : PageIndexText("pg %d of %d")
+{
+}
 
 class GameInfoBlockParser : public MapInfoBlockParser
 {
@@ -570,7 +612,7 @@ protected:
 			if(sc.CheckToken(TK_Identifier))
 			{
 				gameinfo.Border.issolid = true;
-				if(!sc->str.CompareNoCase("inset") == 0)
+				if(sc->str.CompareNoCase("inset") != 0)
 					sc.ScriptMessage(Scanner::ERROR, "Expected 'inset' got '%s' instead.", sc->str.GetChars());
 				sc.MustGetToken(',');
 				sc.MustGetToken(TK_StringConst);
@@ -634,6 +676,8 @@ protected:
 			ParseNameAssignment(gameinfo.DoorSoundSequence);
 		else if(key.CompareNoCase("drawreadthis") == 0)
 			ParseBoolAssignment(gameinfo.DrawReadThis);
+		else if(key.CompareNoCase("trackhighscores") == 0)
+			ParseBoolAssignment(gameinfo.TrackHighScores);
 		else if(key.CompareNoCase("gamecolormap") == 0)
 			ParseStringAssignment(gameinfo.GameColormap);
 		else if(key.CompareNoCase("gameoverpic") == 0)
@@ -713,6 +757,8 @@ protected:
 			ParseFontColorAssignment(gameinfo.FontColors[GameInfo::HIGHSCORES]);
 		else if(key.CompareNoCase("pageindexfontcolor") == 0)
 			ParseFontColorAssignment(gameinfo.FontColors[GameInfo::PAGEINDEX]);
+		else if(key.CompareNoCase("pageindextext") == 0)
+			ParseStringAssignment(gameinfo.PageIndexText);
 		else if(key.CompareNoCase("psyched") == 0)
 		{
 			ParseColorArrayAssignment(gameinfo.PsychedColors, 2);
@@ -733,7 +779,7 @@ protected:
 			{
 				sc.MustGetToken(TK_StringConst);
 				gameinfo.PlayerClasses.Push(sc->str);
-				
+
 			}
 			while(sc.CheckToken(','));
 		}
@@ -845,9 +891,9 @@ protected:
 
 static TMap<unsigned int, ClusterInfo> clusters;
 
-ClusterInfo::ClusterInfo() : ExitTextType(ClusterInfo::EXIT_STRING),
-	TextFont(SmallFont), TextAlignment(TS_Left), TextAnchor(TS_Middle),
-	TextColor(CR_UNTRANSLATED)
+ClusterInfo::ClusterInfo() : EnterTextType(ClusterInfo::EXIT_STRING),
+	ExitTextType(ClusterInfo::EXIT_STRING), TextFont(SmallFont),
+	TextAlignment(TS_Left), TextAnchor(TS_Middle), TextColor(CR_UNTRANSLATED)
 {
 }
 
@@ -952,7 +998,8 @@ static TArray<SkillInfo> skills;
 static TMap<FName, unsigned int> skillIds;
 
 SkillInfo::SkillInfo() : DamageFactor(FRACUNIT), PlayerDamageFactor(FRACUNIT),
-	SpawnFilter(0), MapFilter(0), FastMonsters(false), QuizHints(false)
+	SpawnFilter(0), MapFilter(0), FastMonsters(false), QuizHints(false), LivesCount(3),
+	ScoreMultiplier(FRACUNIT)
 {
 }
 
@@ -968,7 +1015,7 @@ unsigned int SkillInfo::GetSkillIndex(const SkillInfo &skill)
 
 SkillInfo &SkillInfo::GetSkill(unsigned int index)
 {
-	return skills[index];
+	return skills[MIN(index, skills.Size()-1)];
 }
 
 class SkillInfoBlockParser : public MapInfoBlockParser
@@ -1027,6 +1074,10 @@ protected:
 		}
 		else if(key.CompareNoCase("quizhints") == 0)
 			ParseBoolAssignment(skill->QuizHints);
+        else if(key.CompareNoCase("lives") == 0)
+            ParseIntAssignment(skill->LivesCount);
+        else if (key.CompareNoCase("scoremultiplier") == 0)
+            ParseFixedAssignment(skill->ScoreMultiplier);
 		else
 			return false;
 		return true;
@@ -1089,10 +1140,7 @@ protected:
 			action.action = cast;
 
 			if(!ParseCast(cast))
-			{
-				delete cast;
 				return false;
-			}
 		}
 		else if(key.CompareNoCase("Fader") == 0)
 		{
@@ -1102,10 +1150,7 @@ protected:
 			action.action = fader;
 
 			if(!ParseFader(fader))
-			{
-				delete fader;
 				return false;
-			}
 		}
 		else if(key.CompareNoCase("GotoTitle") == 0)
 		{
@@ -1124,10 +1169,7 @@ protected:
 			{
 				sc.MustGetToken(TK_Identifier);
 				if(!CheckStandardKey(action.action, sc->str))
-				{
-					delete action.action;
 					return false;
-				}
 			}
 		}
 		else if(key.CompareNoCase("Link") == 0)
@@ -1143,10 +1185,7 @@ protected:
 			action.action = textscreen;
 
 			if(!ParseTextScreen(textscreen))
-			{
-				delete textscreen;
 				return false;
-			}
 		}
 		else if(key.CompareNoCase("VictoryStats") == 0)
 		{
@@ -1358,7 +1397,7 @@ protected:
 static void SkipBlock(Scanner &sc)
 {
 	// Skip header
-	while(sc.GetNextToken() && sc->token != '{');
+	while(sc.GetNextToken() && sc->token != '{') {}
 	// Skip content
 	unsigned int level = 0;
 	while(sc.GetNextToken() && (level != 0 || sc->token != '}'))
@@ -1372,9 +1411,7 @@ static void SkipBlock(Scanner &sc)
 
 static void ParseMapInfoLump(int lump, bool gameinfoPass)
 {
-	FMemLump data = Wads.ReadLump(lump);
-	Scanner sc((const char*)data.GetMem(), data.GetSize());
-	sc.SetScriptIdentifier(Wads.GetLumpFullName(lump));
+	Scanner sc(lump);
 
 	while(sc.TokensLeft())
 	{
@@ -1461,6 +1498,66 @@ static void ParseMapInfoLump(int lump, bool gameinfoPass)
 	}
 }
 
+// The Mac version of Wolf3D had a primitive scenario definition chunk.
+void ParseMacMapList(int lumpnum)
+{
+	int songlumpnum = Wads.CheckNumForName("SONGLIST");
+	TArray<WORD> songs;
+	if(songlumpnum != -1)
+	{
+		FWadLump songlump = Wads.OpenLumpNum(songlumpnum);
+		songs.Resize(songlump.GetLength()/2);
+		songlump.Read(&songs[0], songs.Size()*2);
+		for(unsigned int i = 0;i < songs.Size();++i)
+			songs[i] = BigShort(songs[i]);
+
+		gameinfo.TitleMusic.Format("MUS_%04X", songs[0]);
+		gameinfo.MenuMusic = gameinfo.TitleMusic;
+		gameinfo.IntermissionMusic.Format("MUS_%04X", songs[1]);
+	}
+
+	FWadLump lump = Wads.OpenLumpNum(lumpnum);
+
+	WORD numMaps;
+	lump.Read(&numMaps, sizeof(numMaps));
+	lump.Seek(2, SEEK_CUR);
+	numMaps = BigShort(numMaps);
+
+	for(unsigned int i = 0;i < numMaps;++i)
+	{
+		WORD nextLevel, nextSecret, parTime, scenarioNum, floorNum;
+		lump.Read(&nextLevel, sizeof(nextLevel));
+		lump.Read(&nextSecret, sizeof(nextSecret));
+		lump.Read(&parTime, sizeof(parTime));
+		lump.Read(&scenarioNum, sizeof(scenarioNum));
+		lump.Read(&floorNum, sizeof(floorNum));
+
+		nextLevel = BigShort(nextLevel);
+		nextSecret = BigShort(nextSecret);
+		parTime = BigShort(parTime);
+		scenarioNum = BigShort(scenarioNum);
+		floorNum = BigShort(floorNum);
+
+		LevelInfo info = defaultMap;
+		mysnprintf(info.MapName, countof(info.MapName), "MAP%02d", i+1);
+		info.NextMap.Format("MAP%02d", nextLevel+1);
+		info.NextSecret.Format("MAP%02d", nextSecret+1);
+		info.Par = parTime;
+		info.FloorNumber.Format("%-2d-%d", scenarioNum, floorNum);
+		info.UseMapInfoName = true;
+		info.Name = info.FloorNumber;
+
+		if(songs.Size() > 0)
+			info.Music.Format("MUS_%04X", songs[(i+2)%songs.Size()]);
+
+		LevelInfo &existing = LevelInfo::Find(info.MapName);
+		if(&existing != &defaultMap)
+			existing = info;
+		else
+			levelInfos.Push(info);
+	}
+}
+
 void G_ParseMapInfo(bool gameinfoPass)
 {
 	int lastlump = 0;
@@ -1468,6 +1565,9 @@ void G_ParseMapInfo(bool gameinfoPass)
 
 	if((lump = Wads.GetNumForFullName(IWad::GetGame().Mapinfo)) != -1)
 		ParseMapInfoLump(lump, gameinfoPass);
+
+	if(!gameinfoPass && (lump = Wads.CheckNumForName("MAPLIST")) != -1)
+		ParseMacMapList(lump);
 
 	while((lump = Wads.FindLump("MAPINFO", &lastlump)) != -1)
 		ParseMapInfoLump(lump, gameinfoPass);
@@ -1479,13 +1579,13 @@ void G_ParseMapInfo(bool gameinfoPass)
 	if(!gameinfoPass)
 	{
 		if(episodes.Size() == 0)
-			Quit("At least 1 episode must be defined.");
+			I_FatalError("At least 1 episode must be defined.");
 
 		for(unsigned int i = 0;i < gameinfo.PlayerClasses.Size();++i)
 		{
 			const ClassDef *cls = ClassDef::FindClass(gameinfo.PlayerClasses[i]);
 			if(!cls || !cls->IsDescendantOf(NATIVE_CLASS(PlayerPawn)))
-				Quit("'%s' is not a valid player class!", gameinfo.PlayerClasses[i].GetChars());
+				I_FatalError("'%s' is not a valid player class!", gameinfo.PlayerClasses[i].GetChars());
 		}
 	}
 }

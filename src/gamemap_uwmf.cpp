@@ -38,6 +38,7 @@
 #include "id_ca.h"
 #include "lnspec.h"
 #include "scanner.h"
+#include "thingdef/thingdef.h"
 #include "w_wad.h"
 #include "wl_game.h"
 #include "wl_shade.h"
@@ -183,8 +184,31 @@ void TextMapParser::ParseTrigger(Scanner &sc, MapTrigger &trigger)
 	}
 	else CheckKey("action")
 	{
-		sc.MustGetToken(TK_IntConst);
-		trigger.action = sc->number;
+		if(sc.CheckToken(TK_IntConst))
+		{
+			trigger.action = sc->number;
+
+			// Warn on first use of deprecated special number.
+			static bool deprSpecial = false;
+			if(!deprSpecial)
+			{
+				deprSpecial = true;
+				sc.ScriptMessage(Scanner::WARNING, "Use of action special number is deprecated. Use names instead.");
+			}
+		}
+		else
+		{
+			sc.MustGetToken(TK_StringConst);
+			Specials::LineSpecials num = Specials::LookupFunctionNum(sc->str);
+			if(num != Specials::NUM_POSSIBLE_SPECIALS)
+				trigger.action = num;
+			else
+			{
+				if(!sc->str.IsEmpty())
+					sc.ScriptMessage(Scanner::WARNING, "Could not resolve action special '%s'.", sc->str.GetChars());
+				trigger.action = 0;
+			}
+		}
 	}
 	else CheckKey("arg0")
 	{
@@ -256,11 +280,13 @@ class UWMFParser : public TextMapParser
 
 		void Parse()
 		{
-			bool ecwolf12Namespace = false;
+			bool ecwolfNamespace = false;
 			bool canChangeHeader = true;
 			gm->header.width = 64;
 			gm->header.height = 64;
 			gm->header.tileSize = 64;
+			gm->header.sky.SetInvalid();
+			gm->header.skyHorizonOffset = 0;
 
 			while(sc.TokensLeft())
 			{
@@ -272,9 +298,9 @@ class UWMFParser : public TextMapParser
 					{
 						sc.MustGetToken(TK_StringConst);
 						// Experimental namespace
-						ecwolf12Namespace = sc->str.Compare("ECWolf-v12") == 0;
-						if(sc->str.Compare("Wolf3D") != 0 && !ecwolf12Namespace)
-							sc.ScriptMessage(Scanner::WARNING, "Wolf3D and ECWolf-v12 are the only supported namespaces.\n");
+						ecwolfNamespace = sc->str.Compare("ECWolf-v12") == 0 || sc->str.Compare("ECWolf-v14") == 0;
+						if(sc->str.Compare("Wolf3D") != 0 && !ecwolfNamespace)
+							sc.ScriptMessage(Scanner::WARNING, "Wolf3D, ECWolf-v12, and ECWolf-v14 are the only supported namespaces.\n");
 					}
 					else CheckKey("tilesize")
 					{
@@ -305,17 +331,30 @@ class UWMFParser : public TextMapParser
 					// stone.
 					else CheckKey("defaultlightlevel")
 					{
-						if(!ecwolf12Namespace)
+						if(!ecwolfNamespace)
 							sc.ScriptMessage(Scanner::WARNING, "Setting defaultlightlevel on Wolf3D namespace not standard, use ECWolf-v12\n");
 						sc.MustGetToken(TK_IntConst);
 						gLevelLight = sc->number;
 					}
 					else CheckKey("defaultvisibility")
 					{
-						if(!ecwolf12Namespace)
+						if(!ecwolfNamespace)
 							sc.ScriptMessage(Scanner::WARNING, "Setting defaultvisibility on Wolf3D namespace not standard, use ECWolf-v12\n");
 						sc.MustGetToken(TK_FloatConst);
 						gLevelVisibility = static_cast<fixed>(sc->decimal*LIGHTVISIBILITY_FACTOR*65536.);
+					}
+					else CheckKey("sky")
+					{
+						if(!ecwolfNamespace)
+							sc.ScriptMessage(Scanner::WARNING, "Setting sky on Wolf3D namespace not standard, use ECWolf-v14\n");
+						sc.MustGetToken(TK_StringConst);
+						gm->header.sky = TexMan.GetTexture(sc->str, FTexture::TEX_Wall);
+					}
+					else CheckKey("skyhorizonoffset")
+					{
+						if(!ecwolfNamespace)
+							sc.ScriptMessage(Scanner::WARNING, "Setting skyhorizonoffset on Wolf3D namespace not standard, use ECWolf-v14\n");
+						gm->header.skyHorizonOffset = MustGetSignedInteger(sc);
 					}
 					else
 						sc.GetNextToken();
@@ -487,8 +526,26 @@ class UWMFParser : public TextMapParser
 			}
 			else CheckKey("type")
 			{
-				sc.MustGetToken(TK_IntConst);
-				thing.type = sc->number;
+				if(sc.CheckToken(TK_IntConst))
+				{
+					// Deprecated use of Doom Editor Number
+					static bool deprEdNum = false;
+					if(!deprEdNum)
+					{
+						deprEdNum = true;
+						sc.ScriptMessage(Scanner::WARNING, "Deprecated use of editor number. Use class name instead.");
+					}
+
+					if(const ClassDef *cls = ClassDef::FindClass(sc->number))
+						thing.type = cls->GetName();
+					else if(sc->number >= 1 && sc->number <= SMT_NumThings)
+						thing.type = SpecialThingNames[sc->number-1];
+				}
+				else
+				{
+					sc.MustGetToken(TK_StringConst);
+					thing.type = FName(sc->str, true);
+				}
 			}
 			else CheckKey("ambush")
 			{

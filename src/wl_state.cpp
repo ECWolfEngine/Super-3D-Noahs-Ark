@@ -10,7 +10,9 @@
 #include "thingdef/thingdef.h"
 #include "wl_agent.h"
 #include "wl_game.h"
+#include "wl_net.h"
 #include "wl_play.h"
+#include "wl_state.h"
 #include "templates.h"
 
 /*
@@ -50,7 +52,7 @@ static const dirtype diagonal[9][9] =
 bool TryWalk (AActor *ob);
 bool MoveObj (AActor *ob, int32_t move);
 
-void    FirstSighting (AActor *ob);
+static void FirstSighting (AActor *ob, const Frame *state);
 
 /*
 =============================================================================
@@ -69,6 +71,30 @@ void    FirstSighting (AActor *ob);
 =============================================================================
 */
 
+
+// Determines if the MapSpot is open to receive a monster
+bool TrySpot(AActor *ob, MapSpot spot)
+{
+	unsigned int x = spot->GetX();
+	unsigned int y = spot->GetY();
+
+	for(AActor::Iterator iter = AActor::GetIterator();iter.Next();)
+	{
+		// We want to check where the actor is heading instead of the exact
+		// tile it exists in since this is essentially how Wolf3D handled things
+		// We must first determine if the monster has moved into the destination
+		// tile or not.  (Half way to destination.)
+
+		const dirtype offsetDir = iter->distance >= TILEGLOBAL/2 ? iter->dir : nodir;
+
+		// Players need not be checked
+		if(iter != ob && !iter->player && (iter->flags & FL_SOLID) &&
+			static_cast<unsigned int>(iter->tilex+dirdeltax[offsetDir]) == x &&
+			static_cast<unsigned int>(iter->tiley+dirdeltay[offsetDir]) == y)
+			return false;
+	}
+	return true;
+}
 
 /*
 ==================================
@@ -108,8 +134,9 @@ static inline short CheckSide(AActor *ob, unsigned int x, unsigned int y, MapTri
 						used = true;
 				}
 			}
-			if(used)
+			if(used && spot->thinker)
 			{
+				// Wait for door
 				ob->distance = -1;
 				return 1;
 			}
@@ -117,21 +144,9 @@ static inline short CheckSide(AActor *ob, unsigned int x, unsigned int y, MapTri
 		if(spot->slideAmount[dir] != 0xffff)
 			return 0;
 	}
-	for(AActor::Iterator iter = AActor::GetIterator();iter.Next();)
-	{
-		// We want to check where the actor is heading instead of the exact
-		// tile it exists in since this is essentially how Wolf3D handled things
-		// We must first determine if the monster has moved into the destination
-		// tile or not.  (Half way to destination.)
 
-		const dirtype offsetDir = iter->distance >= TILEGLOBAL/2 ? iter->dir : nodir;
-
-		// Players need not be checked
-		if(iter != ob && !iter->player && (iter->flags & FL_SOLID) &&
-			static_cast<unsigned int>(iter->tilex+dirdeltax[offsetDir]) == x &&
-			static_cast<unsigned int>(iter->tiley+dirdeltay[offsetDir]) == y)
-			return 0;
-	}
+	if(!TrySpot(ob, spot))
+		return 0;
 	return -1;
 }
 #define CHECKSIDE(x,y,dir) \
@@ -229,7 +244,7 @@ bool TryWalk (AActor *ob)
 = SelectDodgeDir
 =
 = Attempts to choose and initiate a movement for ob that sends it towards
-= the players[0].mo while dodging
+= the player while dodging
 =
 = If there is no possible move (ob is totally surrounded)
 =
@@ -265,8 +280,8 @@ void SelectDodgeDir (AActor *ob)
 	else
 		turnaround=opposite[ob->dir];
 
-	deltax = players[0].mo->tilex - ob->tilex;
-	deltay = players[0].mo->tiley - ob->tiley;
+	deltax = ob->target->tilex - ob->tilex;
+	deltay = ob->target->tiley - ob->tiley;
 
 	//
 	// arange 5 direction choices in order of preference
@@ -372,8 +387,8 @@ void SelectChaseDir (AActor *ob)
 	olddir=ob->dir;
 	turnaround=opposite[olddir];
 
-	deltax=players[0].mo->tilex - ob->tilex;
-	deltay=players[0].mo->tiley - ob->tiley;
+	deltax=ob->target->tilex - ob->tilex;
+	deltay=ob->target->tiley - ob->tiley;
 
 	d[1]=nodir;
 	d[2]=nodir;
@@ -479,8 +494,8 @@ void SelectRunDir (AActor *ob)
 	dirtype tdir;
 
 
-	deltax=players[0].mo->tilex - ob->tilex;
-	deltay=players[0].mo->tiley - ob->tiley;
+	deltax=ob->target->tilex - ob->tilex;
+	deltay=ob->target->tiley - ob->tiley;
 
 	if (deltax<0)
 		d[1]= east;
@@ -530,6 +545,70 @@ void SelectRunDir (AActor *ob)
 	ob->dir = nodir;                // can't move
 }
 
+/*
+============================
+=
+= SelectWanderDir
+=
+= Pick a random direction.
+=
+============================
+*/
+
+void SelectWanderDir(AActor *ob)
+{
+	if(ob->dir == nodir)
+		ob->dir = (dirtype)(pr_newchasedir()&7);
+
+	// Randomly keep direction if possible.
+	if(pr_newchasedir() < 150)
+	{
+		if(TryWalk(ob))
+			return;
+	}
+
+	dirtype turnaround = opposite[ob->dir];
+	const dirtype startdir = ob->dir;
+
+	if (pr_newchasedir()>128)      /*randomly determine direction of search*/
+	{
+		for (dirtype tdir=(dirtype)((startdir+1)&7); tdir!=startdir; tdir=(dirtype)((tdir+1)&7))
+		{
+			if (tdir!=turnaround)
+			{
+				ob->dir=tdir;
+				if ( TryWalk(ob) )
+					return;
+			}
+		}
+	}
+	else
+	{
+		for (dirtype tdir=(dirtype)((startdir-1)&7); tdir!=startdir; tdir=(dirtype)((tdir-1)&7))
+		{
+			if (tdir!=turnaround)
+			{
+				ob->dir=tdir;
+				if ( TryWalk(ob) )
+					return;
+			}
+		}
+	}
+
+	if (turnaround != nodir)
+	{
+		ob->dir=turnaround;
+		if (ob->dir != nodir)
+		{
+			if ( TryWalk(ob) )
+				return;
+		}
+	}
+
+	ob->dir = nodir;                // can't move
+
+	
+}
 
 /*
 =================
@@ -583,68 +662,72 @@ bool MoveObj (AActor *ob, int32_t move)
 			return true;
 
 		default:
-			Printf ("MoveObj: bad dir!");
+			Printf ("MoveObj: bad dir!\n");
 			assert(ob->dir <= nodir);
 	}
 
 	//
 	// check to make sure it's not on top of player
 	//
-	if (map->CheckLink(ob->GetZone(), players[0].mo->GetZone(), true))
+	for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
 	{
-		fixed r = ob->radius + players[0].mo->radius;
-		if (abs(ob->x - players[0].mo->x) > r || abs(ob->y - players[0].mo->y) > r)
-			goto moveok;
-
-		if (ob->GetClass()->Meta.GetMetaInt(AMETA_Damage) >= 0)
-			TakeDamage (ob->GetDamage(), ob);
-
-		//
-		// back up
-		//
-		switch (ob->dir)
+		if (map->CheckLink(ob->GetZone(), players[i].mo->GetZone(), true))
 		{
-			case north:
-				ob->y += move;
-				break;
-			case northeast:
-				ob->x -= move;
-				ob->y += move;
-				break;
-			case east:
-				ob->x -= move;
-				break;
-			case southeast:
-				ob->x -= move;
-				ob->y -= move;
-				break;
-			case south:
-				ob->y -= move;
-				break;
-			case southwest:
-				ob->x += move;
-				ob->y -= move;
-				break;
-			case west:
-				ob->x += move;
-				break;
-			case northwest:
-				ob->x += move;
-				ob->y += move;
-				break;
+			fixed r = ob->radius + players[i].mo->radius;
+			if (abs(ob->x - players[i].mo->x) > r || abs(ob->y - players[i].mo->y) > r)
+				continue;
 
-			case nodir:
-				return false;
+			if ((players[i].mo->flags & FL_SHOOTABLE) && ob->GetClass()->Meta.GetMetaInt(AMETA_Damage) >= 0)
+				DamageActor (players[i].mo, ob, ob->GetDamage());
+
+			//
+			// back up
+			//
+			switch (ob->dir)
+			{
+				case north:
+					ob->y += move;
+					break;
+				case northeast:
+					ob->x -= move;
+					ob->y += move;
+					break;
+				case east:
+					ob->x -= move;
+					break;
+				case southeast:
+					ob->x -= move;
+					ob->y -= move;
+					break;
+				case south:
+					ob->y -= move;
+					break;
+				case southwest:
+					ob->x += move;
+					ob->y -= move;
+					break;
+				case west:
+					ob->x += move;
+					break;
+				case northwest:
+					ob->x += move;
+					ob->y += move;
+					break;
+
+				case nodir:
+					return false;
+			}
+			return false;
 		}
-		return false;
 	}
-moveok:
 	ob->distance -=move;
 
 	// Check for touching objects
-	for(AActor::Iterator iter = AActor::GetIterator();iter.Next();)
+	for(AActor::Iterator iter = AActor::GetIterator().Next();iter;)
 	{
 		AActor *check = iter;
+		iter.Next();
+
 		if(check == ob || (check->flags & FL_SOLID))
 			continue;
 
@@ -680,8 +763,17 @@ moveok:
 */
 
 static FRandom pr_damagemobj("ActorTakeDamage");
-void DamageActor (AActor *ob, unsigned damage)
+void DamageActor (AActor *ob, AActor *attacker, unsigned damage)
 {
+	if (ob->player)
+	{
+		if ((attacker && attacker->player) && !Net::FriendlyFire())
+			return;
+
+		ob->player->TakeDamage(damage, attacker);
+		return;
+	}
+
 	madenoise = true;
 
 	//
@@ -690,18 +782,25 @@ void DamageActor (AActor *ob, unsigned damage)
 	if ( !(ob->flags & FL_ATTACKMODE) )
 		damage <<= 1;
 
+	NetDPrintf("%s %d points\n", __FUNCTION__, FixedMul(damage, gamestate.difficulty->PlayerDamageFactor));
 	ob->health -= FixedMul(damage, gamestate.difficulty->PlayerDamageFactor);
+	// Ensure that we're targetting a player for now.
+	if(attacker && attacker->player)
+		ob->target = attacker;
 
 	if (ob->health<=0)
 	{
-		ob->killerx = players[0].mo->x;
-		ob->killery = players[0].mo->y;
+		if(attacker)
+		{
+			ob->killerx = attacker->x;
+			ob->killery = attacker->y;
+		}
 		ob->Die();
 	}
 	else
 	{
 		if (! (ob->flags & FL_ATTACKMODE) )
-			FirstSighting (ob);             // put into combat mode
+			FirstSighting (ob, ob->SeeState);             // put into combat mode
 
 		if(ob->PainState && pr_damagemobj() < ob->painchance)
 			ob->SetState(ob->PainState);
@@ -732,6 +831,22 @@ bool CheckSlidePass(unsigned int style, unsigned int intercept, unsigned int amo
 	}
 }
 
+// Helps prevent leakage cases in CheckLine
+static inline bool CheckAdjacentTileBlockage(int x, int y, int lastx, int lasty) {
+	int adjacentX, adjacentY;
+	if (abs(lastx - x) != 1 || abs(lasty - y) != 1)
+		return false;
+
+	adjacentX = lastx > x ? x + 1 : x - 1;
+	adjacentY = lasty > y ? y + 1 : y - 1;
+
+	MapSpot adjacentSpot1 = map->GetSpot(adjacentX, y, 0);
+	MapSpot adjacentSpot2 = map->GetSpot(x, adjacentY, 0);
+	if (adjacentSpot1->tile && adjacentSpot2->tile)
+		return true;
+
+	return false;
+}
 
 /*
 =====================
@@ -742,8 +857,7 @@ bool CheckSlidePass(unsigned int style, unsigned int intercept, unsigned int amo
 =
 =====================
 */
-
-bool CheckLine (AActor *ob)
+bool CheckLine (const AActor *ob, const AActor *ob2)
 {
 	int         x1,y1,xt1,yt1,x2,y2,xt2,yt2;
 	int         x,y;
@@ -753,16 +867,20 @@ bool CheckLine (AActor *ob)
 	int         xfrac,yfrac,deltafrac;
 	unsigned    intercept;
 	MapTile::Side	direction;
+	int			lastx, lasty;
+
+	if (!ob2)
+		return false;
 
 	x1 = ob->x >> UNSIGNEDSHIFT;            // 1/256 tile precision
 	y1 = ob->y >> UNSIGNEDSHIFT;
 	xt1 = x1 >> 8;
 	yt1 = y1 >> 8;
 
-	x2 = players[0].mo->x >> UNSIGNEDSHIFT;
-	y2 = players[0].mo->y >> UNSIGNEDSHIFT;
-	xt2 = players[0].mo->tilex;
-	yt2 = players[0].mo->tiley;
+	x2 = ob2->x >> UNSIGNEDSHIFT;
+	y2 = ob2->y >> UNSIGNEDSHIFT;
+	xt2 = ob2->tilex;
+	yt2 = ob2->tiley;
 
 	xdist = abs(xt2-xt1);
 
@@ -792,6 +910,9 @@ bool CheckLine (AActor *ob)
 			ystep = ltemp;
 		yfrac = y1 + (((int32_t)ystep*partial) >>8);
 
+		lastx = xt1;
+		lasty = yt1;
+
 		x = xt1+xstep;
 		xt2 += xstep;
 		do
@@ -800,21 +921,30 @@ bool CheckLine (AActor *ob)
 			yfrac += ystep;
 
 			MapSpot spot = map->GetSpot(x, y, 0);
-			x += xstep;
-
+			
 			if (!spot->tile)
-				continue;
-			if (spot->tile && spot->slideAmount[direction] == 0)
-				return false;
+			{
+				if (CheckAdjacentTileBlockage(x, y, lastx, lasty))
+					return false;
+			}
+			else 
+			{
+				if (spot->slideAmount[direction] == 0)
+					return false;
 
-			//
-			// see if the door is open enough
-			//
-			intercept = yfrac-ystep/2;
+				//
+				// see if the door is open enough
+				//
+				intercept = yfrac - ystep / 2;
 
-			if (!CheckSlidePass(spot->slideStyle, intercept, spot->slideAmount[direction]))
-				return false;
+				if (!CheckSlidePass(spot->slideStyle, intercept, spot->slideAmount[direction]))
+					return false;
 
+			}
+			lastx = x;
+			lasty = y;
+
+			x += xstep;
 		} while (x != xt2);
 	}
 
@@ -846,6 +976,9 @@ bool CheckLine (AActor *ob)
 			xstep = ltemp;
 		xfrac = x1 + (((int32_t)xstep*partial) >>8);
 
+		lasty = yt1;
+		lastx = xt1;
+
 		y = yt1 + ystep;
 		yt2 += ystep;
 		do
@@ -854,26 +987,34 @@ bool CheckLine (AActor *ob)
 			xfrac += xstep;
 
 			MapSpot spot = map->GetSpot(x, y, 0);
-			y += ystep;
 
 			if (!spot->tile)
-				continue;
-			if (spot->tile && spot->slideAmount[direction] == 0)
-				return false;
+			{
+				if (CheckAdjacentTileBlockage(x, y, lastx, lasty))
+					return false;
+			}
+			else 
+			{
+				if (spot->slideAmount[direction] == 0)
+					return false;
 
-			//
-			// see if the door is open enough
-			//
-			intercept = xfrac-xstep/2;
+				//
+				// see if the door is open enough
+				//
+				intercept = xfrac - xstep / 2;
 
-			if (intercept>spot->slideAmount[direction])
-				return false;
+				if (intercept>spot->slideAmount[direction])
+					return false;
+			}
+			lastx = x;
+			lasty = y;
+
+			y += ystep;
 		} while (y != yt2);
 	}
 
 	return true;
 }
-
 
 /*
 ================
@@ -891,19 +1032,22 @@ bool CheckLine (AActor *ob)
 
 #define MINSIGHT (0x18000l*64)
 
-static bool CheckSight (AActor *ob, double minseedist, double maxseedist, double maxheardist, double fov)
+static bool CheckSightTo (AActor *ob, AActor *target, double minseedist, double maxseedist, double maxheardist, double fov)
 {
+	if (!(target->flags & FL_SHOOTABLE))
+		return false;
+
 	bool heardnoise = madenoise;
 
 	// Check if we can hear the player's noise
-	if (heardnoise && !map->CheckLink(ob->GetZone(), players[0].mo->GetZone(), true))
+	if (heardnoise && !map->CheckLink(ob->GetZone(), target->GetZone(), true))
 		heardnoise = false;
 
 	//
-	// if the players[0].mo is real close, sight is automatic
+	// if the target is real close, sight is automatic
 	//
-	int32_t deltax = players[0].mo->x - ob->x;
-	int32_t deltay = players[0].mo->y - ob->y;
+	int32_t deltax = target->x - ob->x;
+	int32_t deltay = target->y - ob->y;
 	uint32_t distance = MAX(abs(deltax), abs(deltay))*64;
 
 	if (!(ob->flags & FL_AMBUSH) && heardnoise &&
@@ -940,7 +1084,17 @@ static bool CheckSight (AActor *ob, double minseedist, double maxseedist, double
 	//
 	// trace a line to check for blocking tiles (corners)
 	//
-	return CheckLine (ob);
+	return CheckLine (ob, target);
+}
+
+static int CheckSight (AActor *ob, double minseedist, double maxseedist, double maxheardist, double fov)
+{
+	for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
+	{
+		if(CheckSightTo(ob, players[i].mo, minseedist, maxseedist, maxheardist, fov))
+			return i;
+	}
+	return -1;
 }
 
 
@@ -955,7 +1109,7 @@ static bool CheckSight (AActor *ob, double minseedist, double maxseedist, double
 ===============
 */
 
-void FirstSighting (AActor *ob)
+static void FirstSighting (AActor *ob, const Frame *state)
 {
 	PlaySoundLocActor(ob->seesound, ob);
 	ob->speed = ob->runspeed;
@@ -966,8 +1120,8 @@ void FirstSighting (AActor *ob)
 	ob->flags &= ~FL_PATHING;
 	ob->flags |= FL_ATTACKMODE|FL_FIRSTATTACK;
 
-	if(ob->SeeState)
-		ob->SetState(ob->SeeState);
+	if(state)
+		ob->SetState(state);
 }
 
 
@@ -977,7 +1131,7 @@ void FirstSighting (AActor *ob)
 =
 = SightPlayer
 =
-= Called by actors that ARE NOT chasing the players[0].  If the player
+= Called by actors that ARE NOT chasing the player.  If the player
 = is detected (by sight, noise, or proximity), the actor is put into
 = it's combat frame and true is returned.
 =
@@ -987,7 +1141,7 @@ void FirstSighting (AActor *ob)
 */
 
 static FRandom pr_sight("SightPlayer");
-bool SightPlayer (AActor *ob, double minseedist, double maxseedist, double maxheardist, double fov)
+bool SightPlayer (AActor *ob, double minseedist, double maxseedist, double maxheardist, double fov, const Frame *state)
 {
 	if (notargetmode)
 		return false;
@@ -1017,18 +1171,21 @@ bool SightPlayer (AActor *ob, double minseedist, double maxseedist, double maxhe
 	}
 	else
 	{
-		if (!CheckSight (ob, minseedist, maxseedist, maxheardist, fov))
-			return false;
-		ob->flags &= ~FL_AMBUSH;
+		int player = CheckSight (ob, minseedist, maxseedist, maxheardist, fov);
+		if (player >= 0)
+		{
+			ob->target = players[player].mo;
+			ob->flags &= ~FL_AMBUSH;
 
-		--ob->sighttime; // We need to somehow mark we started.
-		ob->sightrandom = 1; // Account for tic.
-		if(ob->GetDefault()->sightrandom)
-			ob->sightrandom += pr_sight()/ob->GetDefault()->sightrandom;
+			--ob->sighttime; // We need to somehow mark we started.
+			ob->sightrandom = 1; // Account for tic.
+			if(ob->GetDefault()->sightrandom)
+				ob->sightrandom += pr_sight()/ob->GetDefault()->sightrandom;
+		}
 		return false;
 	}
 
-	FirstSighting (ob);
+	FirstSighting (ob, state);
 
 	return true;
 }

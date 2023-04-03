@@ -19,14 +19,20 @@
 extern  bool noadaptive;
 extern  unsigned        tics;
 extern  int             viewsize;
+extern unsigned short Paused;
 
 //
 // current user input
 //
-extern  int         controlx,controly, controlstrafe;              // range from -100 to 100
-extern	int			controlpanx, controlpany;
-extern  bool        buttonstate[NUMBUTTONS], ambuttonstate[NUMAMBUTTONS];
-extern  bool        buttonheld[NUMBUTTONS], ambuttonheld[NUMAMBUTTONS];
+struct TicCmd_t
+{
+	int controlx,controly, controlstrafe; // range from -100 to 100
+	int controlpanx, controlpany;
+	BYTE buttonstate[NUMBUTTONS], ambuttonstate[NUMAMBUTTONS];
+	BYTE buttonheld[NUMBUTTONS], ambuttonheld[NUMAMBUTTONS];
+};
+extern unsigned int ConsolePlayer;
+extern TicCmd_t control[MAXPLAYERS];
 extern  exit_t      playstate;
 extern  bool        madenoise;
 extern  int         godmode;
@@ -36,17 +42,24 @@ extern  bool        demorecord,demoplayback;
 extern  int8_t      *demoptr, *lastdemoptr;
 extern  memptr      demobuffer;
 
+void    PlayFrame();
 void    PlayLoop (void);
 
 void    InitRedShifts (void);
 void    FinishPaletteShifts (void);
 
+void    CheckKeys();
 void    PollControls (bool);
 int     StopMusic(void);
 void    StartMusic(void);
 void    ContinueMusic(int offs);
 void    StartDamageFlash (int damage);
 void    StartBonusFlash (void);
+
+void CalcTics();
+void Delay(int wolfticks);
+int32_t GetTimeCount();
+void ResetTimeCount();
 
 extern  int32_t     funnyticount;           // FOR FUNNY BJ FACE
 

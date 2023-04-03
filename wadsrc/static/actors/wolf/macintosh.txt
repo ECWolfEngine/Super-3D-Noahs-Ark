@@ -1,0 +1,8 @@
+// Base item for Mac treasure items and Noah's fruit.
+actor MacTreasureItem : ExtraLifeItem
+{
+	inventory.amount 1
+	inventory.maxamount 50
+	+COUNTITEM
+	+INVENTORY.ALWAYSPICKUP
+}

@@ -120,9 +120,7 @@ void SndSeqTable::Init()
 
 void SndSeqTable::ParseSoundSequence(int lumpnum)
 {
-	FMemLump lump = Wads.ReadLump(lumpnum);
-	Scanner sc((const char*)(lump.GetMem()), lump.GetSize());
-	sc.SetScriptIdentifier(Wads.GetLumpFullName(lumpnum));
+	Scanner sc(lumpnum);
 
 	while(sc.TokensLeft())
 	{
@@ -157,15 +155,13 @@ void SndSeqTable::ParseSoundSequence(int lumpnum)
 
 				if(sc->str.CompareNoCase("end") == 0)
 				{
-					SndSeqInstruction instr;
-					instr.Instruction = SSI_End;
+					SndSeqInstruction instr = {SSI_End};
 					seq.AddInstruction(instr);
 					break;
 				}
 				else if(sc->str.CompareNoCase("delay") == 0)
 				{
-					SndSeqInstruction instr;
-					instr.Instruction = SSI_Delay;
+					SndSeqInstruction instr = {SSI_Delay};
 					instr.ArgumentRand = 0;
 
 					sc.MustGetToken(TK_IntConst);
@@ -175,8 +171,7 @@ void SndSeqTable::ParseSoundSequence(int lumpnum)
 				}
 				else if(sc->str.CompareNoCase("delayrand") == 0)
 				{
-					SndSeqInstruction instr;
-					instr.Instruction = SSI_Delay;
+					SndSeqInstruction instr = {SSI_Delay};
 
 					sc.MustGetToken(TK_IntConst);
 					instr.Argument = sc->number;
@@ -188,8 +183,7 @@ void SndSeqTable::ParseSoundSequence(int lumpnum)
 				}
 				else if(sc->str.CompareNoCase("play") == 0)
 				{
-					SndSeqInstruction instr;
-					instr.Instruction = SSI_PlaySound;
+					SndSeqInstruction instr = {SSI_PlaySound};
 
 					if(!sc.GetNextString())
 						sc.ScriptMessage(Scanner::ERROR, "Expected logical sound name.");
@@ -199,8 +193,7 @@ void SndSeqTable::ParseSoundSequence(int lumpnum)
 				}
 				else if(sc->str.CompareNoCase("playrepeat") == 0)
 				{
-					SndSeqInstruction instr;
-					instr.Instruction = SSI_PlaySound|SSI_WaitForFinish|SSI_Repeat;
+					SndSeqInstruction instr = {SSI_PlaySound|SSI_WaitForFinish|SSI_Repeat};
 
 					if(!sc.GetNextString())
 						sc.ScriptMessage(Scanner::ERROR, "Expected logical sound name.");
@@ -256,7 +249,7 @@ SndSeqPlayer::~SndSeqPlayer()
 
 // SD_SoundPlaying() seems to intentionally be for adlib/pc speaker only. At
 // least it has been like that since the beginning of ECWolf.
-extern FString SoundPlaying;
+extern SoundIndex SoundPlaying;
 void SndSeqPlayer::Tick()
 {
 	if(!Playing || (Delay != 0 && --Delay > 0))
@@ -264,7 +257,7 @@ void SndSeqPlayer::Tick()
 
 	if(WaitForDone)
 	{
-		if(SoundPlaying.IsNotEmpty())
+		if(!SoundPlaying.IsNull())
 			return;
 		else
 			WaitForDone = false;

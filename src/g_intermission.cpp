@@ -41,15 +41,21 @@
 #include "language.h"
 #include "r_sprites.h"
 #include "tarray.h"
+#include "v_video.h"
 #include "wl_agent.h"
 #include "wl_draw.h"
 #include "wl_game.h"
 #include "wl_inter.h"
 #include "wl_menu.h"
+#include "wl_net.h"
 #include "wl_play.h"
 #include "thingdef/thingdef.h"
 
 static TMap<FName, IntermissionInfo> intermissions;
+
+IntermissionInfo::~IntermissionInfo()
+{
+}
 
 IntermissionInfo *IntermissionInfo::Find(const FName &name)
 {
@@ -58,8 +64,6 @@ IntermissionInfo *IntermissionInfo::Find(const FName &name)
 
 void IntermissionInfo::Clear()
 {
-	for(unsigned int i = 0;i < Actions.Size();++i)
-		delete Actions[i].action;
 	Actions.Clear();
 }
 
@@ -83,12 +87,12 @@ static bool WaitIntermission(unsigned int time)
 {
 	if(time)
 	{
-		return IN_UserInput(time);
+		return IN_UserInput(time, ACK_Any);
 	}
 	else
 	{
 		IN_ClearKeysDown ();
-		IN_Ack ();
+		IN_Ack (ACK_Any);
 		return true;
 	}
 }
@@ -146,8 +150,10 @@ static bool ShowImage(IntermissionAction *image, bool drawonly)
 				StartTravel();
 				SetupGameLevel();
 				FinishTravel();
+				AActor::FinishSpawningActors();
 				// Drop weapon
-				players[0].SetPSprite(NULL, player_t::ps_weapon);
+				for(unsigned int i = 0;i < Net::InitVars.numPlayers;++i)
+					players[i].SetPSprite(NULL, player_t::ps_weapon);
 				PreloadGraphics(true);
 				gamestate.victoryflag = true;
 			}
@@ -301,19 +307,19 @@ bool ShowIntermission(const IntermissionInfo *intermission, bool demoMode)
 			{
 				default:
 				case IntermissionInfo::IMAGE:
-					acked = ShowImage(intermission->Actions[i].action, false);
+					acked = ShowImage(intermission->Actions[i].action.Get(), false);
 					break;
 				case IntermissionInfo::CAST:
-					acked = gototitle = ShowCast((CastIntermissionAction*)intermission->Actions[i].action);
+					acked = gototitle = ShowCast((CastIntermissionAction*)intermission->Actions[i].action.Get());
 					break;
 				case IntermissionInfo::FADER:
-					ShowFader((FaderIntermissionAction*)intermission->Actions[i].action);
+					ShowFader((FaderIntermissionAction*)intermission->Actions[i].action.Get());
 					break;
 				case IntermissionInfo::GOTOTITLE:
 					gototitle = true;
 					break;
 				case IntermissionInfo::TEXTSCREEN:
-					acked = ShowTextScreen((TextScreenIntermissionAction*)intermission->Actions[i].action, demoMode);
+					acked = ShowTextScreen((TextScreenIntermissionAction*)intermission->Actions[i].action.Get(), demoMode);
 					break;
 				case IntermissionInfo::VICTORYSTATS:
 					Victory(true);

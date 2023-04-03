@@ -38,7 +38,7 @@
 #define USE_WINDOWS_BOOLEAN
 #include <windows.h>
 #include <direct.h>
-#include <Shlobj.h>
+#include <shlobj.h>
 #else
 #ifdef __APPLE__
 #include <CoreServices/CoreServices.h>
@@ -97,7 +97,10 @@ static void FullFileName(const char* filename, char* dest)
 	ConvertName(fullpath, dest);
 #else
 	if(realpath(filename, dest) == NULL)
-		strncpy(dest, filename, MAX_PATH);
+	{
+		strncpy(dest, filename, MAX_PATH-1);
+		dest[MAX_PATH-1] = 0;
+	}
 #endif
 }
 

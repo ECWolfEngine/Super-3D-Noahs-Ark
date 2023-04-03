@@ -42,6 +42,15 @@
 #include "zdoomsupport.h"
 #include <SDL_mixer.h>
 
+
+// TFuncDeleter can't be used here since Mix_FreeChunk has various attributes
+// on Windows that make it difficult to forward declare. We'd prefer to not
+// include SDL_mixer.h in more places than we absolutely have to.
+struct Mix_ChunkDeleter
+{
+	inline explicit Mix_ChunkDeleter(Mix_Chunk *obj) { Mix_FreeChunk(obj); }
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 // Sound Index
@@ -61,46 +70,29 @@ SoundIndex::SoundIndex(const char* logical)
 
 SoundData::SoundData() : priority(50), isAlias(false)
 {
-	data[0] = data[1] = data[2] = NULL;
 	lump[0] = lump[1] = lump[2] = -1;
-	length[0] = length[1] = length[2] = 0;
-}
-
-SoundData::SoundData(const SoundData &other)
-{
-	*this = other;
 }
 
 SoundData::~SoundData()
 {
-	for(unsigned int i = 0;i < 3;i++)
-	{
-		if(data[i] != NULL)
-			delete[] data[i];
-	}
 }
 
-const SoundData &SoundData::operator= (const SoundData &other)
+template<>
+struct TMoveInsert<SoundData>
 {
-	logicalName = other.logicalName;
-	priority = other.priority;
-	isAlias = other.isAlias;
-	aliasLinks = other.aliasLinks;
-	for(unsigned int i = 0;i < 3;i++)
+	explicit TMoveInsert(void *mem, const SoundData &other)
 	{
-		length[i] = other.length[i];
-		lump[i] = other.lump[i];
-
-		if(lump[i] != -1)
-		{
-			data[i] = new byte[length[i]];
-			memcpy(data[i], other.data[i], length[i]);
-		}
-		else
-			data[i] = NULL;
+		SoundData *data = ::new (mem) SoundData();
+		data->logicalName = other.logicalName;
+		data->priority = other.priority;
+		data->isAlias = other.isAlias;
+		data->aliasLinks = other.aliasLinks;
+		(void)TMoveInsert<TUniquePtr<Mix_Chunk, Mix_ChunkDeleter> >(&data->digitalData, other.digitalData);
+		(void)TMoveInsert<TUniquePtr<byte[]> >(&data->adlibData, other.adlibData);
+		(void)TMoveInsert<TUniquePtr<byte[]> >(&data->speakerData, other.speakerData);
+		memcpy(data->lump, other.lump, sizeof(data->lump));
 	}
-	return *this;
-}
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -228,6 +220,18 @@ SoundIndex SoundInformation::FindSound(const char* logical) const
 	return SoundIndex(index->index);
 }
 
+int SoundInformation::GetMusicLumpNum(FString song) const
+{
+	const int lump = Wads.CheckNumForName(song, ns_music);
+	const int wad = Wads.GetLumpFile(lump);
+
+	const MusicData *alias = MusicAliases.CheckKey(FName(song, true));
+	if(alias && wad <= alias->WadNum)
+		return GetMusicLumpNum(alias->Name);
+
+	return lump;
+}
+
 void SoundInformation::Init()
 {
 	printf("S_Init: Reading SNDINFO defintions.\n");
@@ -238,13 +242,13 @@ void SoundInformation::Init()
 	{
 		ParseSoundInformation(lump);
 	}
+
+	CreateHashTable();
 }
 
 void SoundInformation::ParseSoundInformation(int lumpNum)
 {
-	FMemLump lump = Wads.ReadLump(lumpNum);
-	Scanner sc((const char*)(lump.GetMem()), lump.GetSize());
-	sc.SetScriptIdentifier(Wads.GetLumpFullName(lumpNum));
+	Scanner sc(lumpNum);
 
 	unsigned int excludeDepth = 0; // $if $endif
 	while(sc.TokensLeft() != 0)
@@ -292,6 +296,18 @@ void SoundInformation::ParseSoundInformation(int lumpNum)
 					++excludeDepth;
 			}
 			else if(sc->str.CompareNoCase("endif") == 0) {}
+			else if(sc->str.CompareNoCase("musicalias") == 0)
+			{
+				if(!sc.GetNextString())
+					sc.ScriptMessage(Scanner::ERROR, "Expected music alias name.");
+				FString musicName = sc->str;
+
+				if(!sc.GetNextString())
+					sc.ScriptMessage(Scanner::ERROR, "Expected music lump name.");
+
+				MusicData data = {sc->str, Wads.GetLumpFile(lumpNum)};
+				MusicAliases[musicName] = data;
+			}
 			else
 				sc.ScriptMessage(Scanner::ERROR, "Unknown command '%s'.", sc->str.GetChars());
 		}
@@ -310,13 +326,10 @@ void SoundInformation::ParseSoundInformation(int lumpNum)
 			SoundData &idx = AddSound(sc->str);
 			// Initialize/clean in case we're replacing
 			idx.isAlias = false;
-			for(unsigned int i = 0;i < 3;++i)
-			{
-				delete[] idx.data[i];
-				idx.data[i] = NULL;
-				idx.lump[i] = -1;
-				idx.length[i] = -1;
-			}
+			idx.digitalData.Reset();
+			idx.adlibData.Reset();
+			idx.speakerData.Reset();
+			idx.lump[0] = idx.lump[1] = idx.lump[2] = -1;
 
 			bool hasAlternatives = false;
 
@@ -326,46 +339,50 @@ void SoundInformation::ParseSoundInformation(int lumpNum)
 			unsigned int i = 0;
 			do
 			{
-				if(sc.CheckToken('}') || !sc.GetNextString())
+				if(hasAlternatives)
 				{
-					if(i == 0)
-						sc.ScriptMessage(Scanner::ERROR, "Expected lump name for '%s'.\n", idx.logicalName.GetChars());
-					else
+					if(i > 2)
+					{
+						sc.MustGetToken('}');
 						break;
+					}
+					else if(sc.CheckToken('}'))
+					{
+						break;
+					}
 				}
+
+				if(!sc.GetNextString())
+					sc.ScriptMessage(Scanner::ERROR, "Expected lump name for '%s'.\n", idx.logicalName.GetChars());
 
 				if(sc->str.Compare("NULL") == 0)
 					continue;
-				int sndLump = Wads.CheckNumForName(sc->str, ns_sounds);
 
-				if(i == 2 && !sc.CheckToken('}'))
-					sc.ScriptMessage(Scanner::ERROR, "Expected '}'.\n");
+				int sndLump = Wads.CheckNumForName(sc->str, ns_sounds);
 				if(sndLump == -1)
 					continue;
 
 				idx.lump[i] = sndLump;
 				if(i == 0)
 				{
-					idx.data[i] = SD_PrepareSound(sndLump);
-					idx.length[i] = idx.data[i] == NULL ? 0 : sizeof(Mix_Chunk);
+					idx.digitalData.Reset(SD_PrepareSound(sndLump));
 				}
 				else
 				{
-					idx.length[i] = Wads.LumpLength(sndLump);
-					idx.data[i] = new byte[idx.length[i]];
+					unsigned int length = Wads.LumpLength(sndLump);
+					TUniquePtr<byte[]> &data = i == 1 ? idx.adlibData : idx.speakerData;
+					data.Reset(new byte[length]);
 
 					FWadLump soundReader = Wads.OpenLumpNum(sndLump);
-					soundReader.Read(idx.data[i], idx.length[i]);
+					soundReader.Read(data.Get(), length);
 
 					if(i == 1 || idx.lump[1] == -1)
-						idx.priority = ReadLittleShort(&idx.data[i][4]);
+						idx.priority = ReadLittleShort(&data[4]);
 				}
 			}
-			while(hasAlternatives && ++i < 3);
+			while(++i, hasAlternatives);
 		}
 	}
-
-	CreateHashTable();
 }
 
 static FRandom pr_randsound("RandSound");

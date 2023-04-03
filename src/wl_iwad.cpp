@@ -38,12 +38,14 @@
 #include "lumpremap.h"
 #include "scanner.h"
 #include "tarray.h"
+#include "tmemory.h"
 #include "version.h"
 #include "w_wad.h"
 #include "wl_iwad.h"
 #include "zstring.h"
 
 bool queryiwad = true;
+static bool showpreviewgames = false;
 
 int I_PickIWad(WadStuff *wads, int numwads, bool showwin, int defaultiwad);
 #ifndef _WIN32
@@ -58,9 +60,24 @@ namespace IWad {
 #define ISCASEINSENSITIVE 0
 #endif
 
+struct LevelSet
+{
+	FString FileName;
+	int Type;
+};
+
 static TArray<IWadData> iwadTypes;
+static TArray<FString> iwadNames;
+static TArray<LevelSet> levelSets;
 static const IWadData *selectedGame;
 static unsigned int NumIWads;
+
+// Insert Paths from one WadStuff into another when Required is satisfied
+static void TransferWadStuffPaths(WadStuff &dest, const WadStuff &src)
+{
+	for(unsigned int i = src.Path.Size();i-- > 0;)
+		dest.Path.Insert(0, src.Path[i]);
+}
 
 static bool SplitFilename(const FString &filename, FString &name, FString &extension)
 {
@@ -72,52 +89,138 @@ static bool SplitFilename(const FString &filename, FString &name, FString &exten
 	return true;
 }
 
+static int CheckFileContents(FResourceFile *file, unsigned int* valid)
+{
+	for(unsigned int j = file->LumpCount();j-- > 0;)
+	{
+		FResourceLump *lump = file->GetLump(j);
+
+		for(unsigned int k = 0;k < iwadTypes.Size();++k)
+		{
+			for(unsigned int l = iwadTypes[k].Ident.Size();l-- > 0;)
+			{
+				if(iwadTypes[k].Ident[l].CompareNoCase(lump->Name) == 0 ||
+					(lump->FullName && (strnicmp(lump->FullName, "maps/", 5) == 0 &&
+					iwadTypes[k].Ident[l].CompareNoCase(FString(lump->FullName.Mid(5).GetChars(), strcspn(lump->FullName.Mid(5), "."))))))
+				{
+					valid[k] |= 1<<l;
+				}
+			}
+		}
+	}
+
+	for(unsigned int k = 0;k < iwadTypes.Size();++k)
+	{
+		if(!iwadTypes[k].LevelSet && valid[k] == static_cast<unsigned>((1<<iwadTypes[k].Ident.Size())-1))
+			return k;
+	}
+
+	return -1;
+}
+
+static bool CheckHidden(const IWadData &data)
+{
+	return ((data.Flags & IWad::PREVIEW) && !showpreviewgames) ||
+			!!(data.Flags & IWad::RESOURCE);
+}
+
 // Identifies the IWAD by examining the lumps against the possible requirements.
 // Returns -1 if it isn't identifiable.
 static int CheckData(WadStuff &wad)
 {
-	unsigned int* valid = new unsigned int[iwadTypes.Size()];
-	memset(valid, 0, sizeof(unsigned int)*iwadTypes.Size());
+	TUniquePtr<unsigned int[]> valid(new unsigned int[iwadTypes.Size()]);
+	memset(valid.Get(), 0, sizeof(unsigned int)*iwadTypes.Size());
 
 	for(unsigned int i = 0;i < wad.Path.Size();++i)
 	{
-		FResourceFile *file = FResourceFile::OpenResourceFile(wad.Path[i], NULL, true);
+		TUniquePtr<FResourceFile> file(FResourceFile::OpenResourceFile(wad.Path[i], NULL, true));
 		if(file)
 		{
 			LumpRemapper::RemapAll(); // Fix lump names if needed
-			for(unsigned int j = file->LumpCount();j-- > 0;)
-			{
-				FResourceLump *lump = file->GetLump(j);
 
-				for(unsigned int k = 0;k < iwadTypes.Size();++k)
+			int type;
+			if((type = CheckFileContents(file, valid)) >= 0)
+			{
+				wad.Type = type;
+				wad.Name = iwadTypes[type].Name;
+				wad.Hidden = CheckHidden(iwadTypes[type]);
+				// Don't break here since we might want to refine our selection.
+			}
+		}
+	}
+
+	return wad.Type;
+}
+
+static bool CheckStandalone(const char* directory, FString filename, FString extension, TArray<WadStuff> &iwads)
+{
+	WadStuff wad;
+	for(unsigned int i = 0;i < iwadNames.Size();++i)
+	{
+		if(filename.CompareNoCase(iwadNames[i]) != 0)
+			continue;
+
+		FString path;
+		path.Format("%s/%s", directory, filename.GetChars());
+		TUniquePtr<FResourceFile> file(FResourceFile::OpenResourceFile(path, NULL, true));
+		if(file)
+		{
+			TUniquePtr<unsigned int[]> valid(new unsigned int[iwadTypes.Size()]);
+			memset(valid.Get(), 0, sizeof(unsigned int)*iwadTypes.Size());
+
+			if((wad.Type = CheckFileContents(file, valid)) >= 0)
+			{
+				wad.Path.Push(path);
+				wad.Extension = extension;
+				wad.Name = iwadTypes[wad.Type].Name;
+				wad.Hidden = CheckHidden(iwadTypes[wad.Type]);
+				iwads.Push(wad);
+				return true;
+			}
+		}
+		break;
+	}
+	return false;
+}
+
+/**
+ * Locate level sets based on what required data sets we have available
+ */
+static void CheckForLevelSets(TArray<WadStuff> &iwads)
+{
+	for(unsigned int i = levelSets.Size();i-- > 0;)
+	{
+		const FString fileName = levelSets[i].FileName;
+		const IWadData &lsType = iwadTypes[levelSets[i].Type];
+
+		for(unsigned int r = 0;r < lsType.Required.Size();++r)
+		{
+			for(unsigned int j = 0;j < iwads.Size();++j)
+			{
+				if(iwadTypes[iwads[j].Type].Name.Compare(lsType.Required[r]) == 0)
 				{
-					for(unsigned int l = iwadTypes[k].Ident.Size();l-- > 0;)
-					{
-						if(iwadTypes[k].Ident[l].CompareNoCase(lump->Name) == 0 ||
-							(lump->FullName && (strnicmp(lump->FullName, "maps/", 5) == 0 &&
-							iwadTypes[k].Ident[l].CompareNoCase(FString(lump->FullName+5, strcspn(lump->FullName+5, "."))))))
-						{
-							valid[k] |= 1<<l;
-						}
-					}
+					// Find candidate in same directory as base data
+					File baseFileDir(File(iwads[j].Path[0]).getDirectory());
+					File candidateFile(baseFileDir, baseFileDir.getInsensitiveFile(fileName, false));
+					if(!candidateFile.exists())
+						continue;
+
+					WadStuff wad;
+					wad.Path.Push(candidateFile.getPath());
+					TransferWadStuffPaths(wad, iwads[j]);
+
+					FString dummy;
+					SplitFilename(candidateFile.getPath(), dummy, wad.Extension);
+					wad.Name = lsType.Name;
+					wad.Type = levelSets[i].Type;
+					wad.Hidden = CheckHidden(lsType);
+					iwads.Push(wad);
+					goto FinishLevelSet;
 				}
 			}
-			delete file;
 		}
+	FinishLevelSet:;
 	}
-
-	wad.Type = -1;
-	for(unsigned int i = 0;i < iwadTypes.Size();++i)
-	{
-		if(static_cast<unsigned>((1<<iwadTypes[i].Ident.Size())-1) == valid[i])
-		{
-			wad.Name = iwadTypes[i].Name;
-			wad.Type = i;
-			break;
-		}
-	}
-	delete[] valid;
-	return wad.Type;
 }
 
 bool CheckGameFilter(FName filter)
@@ -146,7 +249,9 @@ enum
 	FILE_VGAGRAPH,
 	FILE_VSWAP,
 
-	BASEFILES
+	BASEFILES,
+
+	FILE_REQMASK = (1<<BASEFILES)-1
 };
 struct BaseFile
 {
@@ -168,9 +273,7 @@ static bool VerifySpearInstall(const char* directory)
 		"vswap."
 	};
 
-	File dir(directory);
-	//if(!dir.isWritable())
-	//	return true;
+	const File dir(directory);
 
 	// Check for gamemaps.sd1, if it doesn't exist assume we're good
 	if(!File(dir, dir.getInsensitiveFile("gamemaps.sd1", false)).exists())
@@ -208,11 +311,11 @@ static bool VerifySpearInstall(const char* directory)
 static void LookForGameData(FResourceFile *res, TArray<WadStuff> &iwads, const char* directory)
 {
 	static const unsigned int LoadableBaseFiles[] = { FILE_AUDIOT, FILE_GAMEMAPS, FILE_VGAGRAPH, FILE_VSWAP, BASEFILES };
-	static const char* const BaseFileNames[BASEFILES] = {
-		"audiohed", "audiot",
-		"gamemaps", "maphead",
-		"vgadict", "vgahead", "vgagraph",
-		"vswap"
+	static const char* const BaseFileNames[BASEFILES][3] = {
+		{"audiohed", NULL}, {"audiot", NULL},
+		{"gamemaps", "maptemp", NULL}, {"maphead", NULL},
+		{"vgadict", NULL}, {"vgahead", NULL}, {"vgagraph", NULL},
+		{"vswap", NULL}
 	};
 	TArray<BaseFile> foundFiles;
 
@@ -228,6 +331,9 @@ static void LookForGameData(FResourceFile *res, TArray<WadStuff> &iwads, const c
 	{
 		FString name, extension;
 		if(!SplitFilename(files[i], name, extension))
+			continue;
+
+		if(CheckStandalone(directory, files[i], extension, iwads))
 			continue;
 
 		BaseFile *base = NULL;
@@ -254,11 +360,16 @@ static void LookForGameData(FResourceFile *res, TArray<WadStuff> &iwads, const c
 		unsigned int baseName = 0;
 		do
 		{
-			if(name.CompareNoCase(BaseFileNames[baseName]) == 0)
+			for(const char* const * nameCheck = BaseFileNames[baseName];*nameCheck;++nameCheck)
 			{
-				base->filename[baseName].Format("%s" PATH_SEPARATOR "%s", directory, files[i].GetChars());
-				base->isValid |= 1<<baseName;
-				break;
+				if(name.CompareNoCase(*nameCheck) == 0)
+				{
+					base->filename[baseName].Format("%s" PATH_SEPARATOR "%s", directory, files[i].GetChars());
+					base->isValid |= 1<<baseName;
+
+					baseName = BASEFILES;
+					break;
+				}
 			}
 		}
 		while(++baseName < BASEFILES);
@@ -300,7 +411,13 @@ static void LookForGameData(FResourceFile *res, TArray<WadStuff> &iwads, const c
 				}
 			}
 			if(doPush)
-				iwads.Push(wadStuff);
+			{
+				if(iwadTypes[wadStuff.Type].Required.Size() > 0 ||
+					(foundFiles[i].isValid & FILE_REQMASK) == FILE_REQMASK)
+				{
+					iwads.Push(wadStuff);
+				}
+			}
 		}
 	}
 
@@ -314,32 +431,35 @@ static void CheckForExpansionRequirements(TArray<WadStuff> &iwads)
 {
 	for(unsigned int i = iwads.Size();i-- > 0;)
 	{
-		const FString &req = iwadTypes[iwads[i].Type].Required;
-		if(!req.IsEmpty())
-		{
-			bool reqSatisfied = false;
+		if(iwadTypes[iwads[i].Type].Required.Size() == 0)
+			continue;
 
-			for(unsigned int j = 0;j < iwads.Size();++j)
+		bool reqSatisfied = false;
+		for(unsigned int j = 0;!reqSatisfied && j < iwadTypes[iwads[i].Type].Required.Size();++j)
+		{
+			const FString &req = iwadTypes[iwads[i].Type].Required[j];
+			if(req.IsNotEmpty())
 			{
-				if(iwadTypes[iwads[j].Type].Name.Compare(req) == 0)
+				for(unsigned int k = 0;k < iwads.Size();++k)
 				{
-					for(unsigned int k = iwads[j].Path.Size();k-- > 0;)
-						iwads[i].Path.Insert(0, iwads[j].Path[k]);
-					reqSatisfied = true;
-					break;
+					if(iwadTypes[iwads[k].Type].Name.Compare(req) == 0)
+					{
+						TransferWadStuffPaths(iwads[i], iwads[k]);
+						reqSatisfied = true;
+						break;
+					}
 				}
 			}
-
-			if(!reqSatisfied)
-				iwads.Delete(i);
 		}
+
+		if(!reqSatisfied)
+			iwads.Delete(i);
 	}
 }
 
-static void ParseIWad(Scanner &sc)
+static IWadData ParseIWad(Scanner &sc)
 {
-	IWadData iwad;
-	iwad.Flags = 0;
+	IWadData iwad = {};
 
 	sc.MustGetToken('{');
 	while(!sc.CheckToken('}'))
@@ -356,6 +476,10 @@ static void ParseIWad(Scanner &sc)
 					iwad.Flags |= IWad::HELPHACK;
 				else if(sc->str.CompareNoCase("Registered") == 0)
 					iwad.Flags |= IWad::REGISTERED;
+				else if(sc->str.CompareNoCase("Preview") == 0)
+					iwad.Flags |= IWad::PREVIEW;
+				else if(sc->str.CompareNoCase("Resource") == 0)
+					iwad.Flags |= IWad::RESOURCE;
 				else
 					sc.ScriptMessage(Scanner::ERROR, "Unknown flag %s.", sc->str.GetChars());
 			}
@@ -373,6 +497,11 @@ static void ParseIWad(Scanner &sc)
 			sc.MustGetToken(TK_StringConst);
 			iwad.Name = sc->str;
 		}
+		else if(key.CompareNoCase("Autoname") == 0)
+		{
+			sc.MustGetToken(TK_StringConst);
+			iwad.Autoname = sc->str;
+		}
 		else if(key.CompareNoCase("Mapinfo") == 0)
 		{
 			sc.MustGetToken(TK_StringConst);
@@ -389,12 +518,16 @@ static void ParseIWad(Scanner &sc)
 		}
 		else if(key.CompareNoCase("Required") == 0)
 		{
-			sc.MustGetToken(TK_StringConst);
-			iwad.Required = sc->str;
+			do
+			{
+				sc.MustGetToken(TK_StringConst);
+				iwad.Required.Push(sc->str);
+			}
+			while(sc.CheckToken(','));
 		}
 	}
 
-	iwadTypes.Push(iwad);
+	return iwad;
 }
 static void ParseIWadInfo(FResourceFile *res)
 {
@@ -412,7 +545,30 @@ static void ParseIWadInfo(FResourceFile *res)
 				sc.MustGetToken(TK_Identifier);
 				if(sc->str.CompareNoCase("IWad") == 0)
 				{
-					ParseIWad(sc);
+					iwadTypes.Push(ParseIWad(sc));
+				}
+				else if(sc->str.CompareNoCase("LevelSet") == 0)
+				{
+					sc.MustGetToken(TK_StringConst);
+
+					LevelSet ls;
+					ls.FileName = sc->str;
+					ls.Type = iwadTypes.Size();
+					levelSets.Push(ls);
+
+					IWadData iwad = ParseIWad(sc);
+					iwad.LevelSet = true;
+					iwadTypes.Push(iwad);
+				}
+				else if(sc->str.CompareNoCase("Names") == 0)
+				{
+					sc.MustGetToken('{');
+					do
+					{
+						sc.MustGetToken(TK_StringConst);
+						iwadNames.Push(sc->str);
+					}
+					while(!sc.CheckToken('}'));
 				}
 				else
 					sc.ScriptMessage(Scanner::ERROR, "Unknown IWADINFO block '%s'.", sc->str.GetChars());
@@ -429,12 +585,19 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 	bool showPicker = config.GetSetting("ShowIWadPicker")->GetInteger() != 0;
 	int defaultIWad = config.GetSetting("DefaultIWad")->GetInteger();
 
-	bool useProgdir = false;
+	if(config.GetSetting("ShowPreviewGames"))
+		showpreviewgames = config.GetSetting("ShowPreviewGames")->GetInteger() != 0;
+
+	FString datawadDir;
 	FResourceFile *datawadRes = FResourceFile::OpenResourceFile(datawad, NULL, true);
 	if(!datawadRes)
 	{
-		useProgdir = true;
-		datawadRes = FResourceFile::OpenResourceFile(progdir + PATH_SEPARATOR + datawad, NULL, true);
+		if((datawadRes = FResourceFile::OpenResourceFile(progdir + PATH_SEPARATOR + datawad, NULL, true)))
+			datawadDir = progdir + PATH_SEPARATOR;
+#if !defined(__APPLE__) && !defined(_WIN32)
+		else if((datawadRes = FResourceFile::OpenResourceFile(FString(INSTALL_PREFIX "/share/" BINNAME "/") + datawad, NULL, true)))
+			datawadDir = FString(INSTALL_PREFIX "/share/" BINNAME "/");
+#endif
 	}
 	if(!datawadRes)
 		I_Error("Could not open %s!", datawad);
@@ -455,9 +618,9 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 
 		// Add documents and application support directories if they're not mapped to the config directory.
 		FString tmp;
-		if((tmp = FileSys::GetDirectoryPath(FileSys::DIR_Documents)) != configDir)
+		if((tmp = FileSys::GetDirectoryPath(FileSys::DIR_Documents)).Compare(configDir) != 0)
 			dataPaths += FString(";") + tmp;
-		if((tmp = FileSys::GetDirectoryPath(FileSys::DIR_ApplicationSupport)) != configDir)
+		if((tmp = FileSys::GetDirectoryPath(FileSys::DIR_ApplicationSupport)).Compare(configDir) != 0)
 			dataPaths += FString(";") + tmp;
 
 		config.CreateSetting("BaseDataPaths", dataPaths);
@@ -494,7 +657,10 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 	while(split != 0);
 
 #if 0
+#if !defined(__APPLE__) && !defined(_WIN32)
+	LookForGameData(datawadRes, basefiles, "/usr/share/games/wolf3d");
 	LookForGameData(datawadRes, basefiles, "/usr/local/share/games/wolf3d");
+#endif
 
 	// Look for a steam install. (Basically from ZDoom)
 	{
@@ -507,8 +673,28 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 		static const CommercialGameDir steamDirs[] =
 		{
 			{FileSys::APP_Wolfenstein3D, PATH_SEPARATOR "base"},
+			{FileSys::APP_Wolfenstein3D, PATH_SEPARATOR "base" PATH_SEPARATOR "m1"},
 			{FileSys::APP_SpearOfDestiny, PATH_SEPARATOR "base"},
-			{FileSys::APP_NoahsArk, ""}
+			{FileSys::APP_NoahsArk, ""},
+#if defined(__APPLE__)
+			{FileSys::APP_ThrowbackPack, PATH_SEPARATOR "Blake Stone AOG.app/Contents/Resources/BlakestoneAOG"},
+			{FileSys::APP_ThrowbackPack, PATH_SEPARATOR "Blake Stone PS.app/Contents/Resources/BlakestonePS"},
+			// Note: There's also a Rise of the triad EX app but the DARKWAR.RTL is different in it, both have Extreme Rise of the Triad data in them anyway
+			{FileSys::APP_ThrowbackPack, PATH_SEPARATOR "Rise of the triad.app/Contents/Resources/ROTT"},
+			{FileSys::APP_AliensOfGold, PATH_SEPARATOR "Blake Stone AOG.app/Contents/Resources/BlakestoneAOG"},
+			{FileSys::APP_PlanetStrike, PATH_SEPARATOR "Blake Stone PS.app/Contents/Resources/BlakestonePS"},
+			{FileSys::APP_RiseOfTheTriad, PATH_SEPARATOR "Rise of the triad.app/Contents/Resources/ROTT"},
+#else
+			{FileSys::APP_ThrowbackPack, PATH_SEPARATOR "Blake Stone"},
+			{FileSys::APP_ThrowbackPack, PATH_SEPARATOR "Planet Strike"},
+			{FileSys::APP_ThrowbackPack, PATH_SEPARATOR "Rise of the Triad"},
+			{FileSys::APP_AliensOfGold, PATH_SEPARATOR "Blake Stone - Aliens of Gold"},
+			{FileSys::APP_PlanetStrike, PATH_SEPARATOR "Blake Stone - Planet Strike"},
+			{FileSys::APP_RiseOfTheTriad, PATH_SEPARATOR "Rise of the Triad - Dark War"},
+#endif
+			// TODO: Corridor 7 isn't unpacked
+			//{FileSys::APP_Corridor7, PATH_SEPARATOR "cd"},
+			{FileSys::APP_OperationBodyCount, PATH_SEPARATOR "C" PATH_SEPARATOR "BCCD"}
 		};
 		for(unsigned int i = 0;i < countof(steamDirs);++i)
 			LookForGameData(datawadRes, basefiles, FileSys::GetSteamPath(steamDirs[i].app) + steamDirs[i].dir);
@@ -516,7 +702,25 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 		static const CommercialGameDir gogDirs[] = 
 		{
 			{FileSys::APP_Wolfenstein3D, ""},
-			{FileSys::APP_SpearOfDestiny, PATH_SEPARATOR "M1"}
+			{FileSys::APP_Wolfenstein3D, PATH_SEPARATOR "m1"},
+			{FileSys::APP_SpearOfDestiny, PATH_SEPARATOR "M1"},
+			{FileSys::APP_NoahsArk, ""},
+#if defined(_WIN32)
+			{FileSys::APP_AliensOfGold, ""},
+			{FileSys::APP_PlanetStrike, ""},
+			{FileSys::APP_RiseOfTheTriad, ""},
+#elif defined(__APPLE__)
+			{FileSys::APP_AliensOfGold, PATH_SEPARATOR "Contents/Resources/game/Blake Stone Aliens of Gold.app/Contents/Resources/Blake Stone Aliens of Gold.boxer/C Blake Stone Aliens of Gold.harddisk"},
+			{FileSys::APP_PlanetStrike, PATH_SEPARATOR "Contents/Resources/game/Blake Stone Planet Strike.app/Contents/Resources/Blake Stone Planet Strike.boxer/C Blake Stone Planet Strike.harddisk"},
+			{FileSys::APP_RiseOfTheTriad, PATH_SEPARATOR "Contents/Resources/game/Rise of the Triad Dark War.app/Contents/Resources/Rise of the Triad Dark-War.boxer/C Rise of The Triad.harddisk"},
+#else
+			{FileSys::APP_AliensOfGold, PATH_SEPARATOR "data"},
+			{FileSys::APP_PlanetStrike, PATH_SEPARATOR "data"},
+			{FileSys::APP_RiseOfTheTriad, PATH_SEPARATOR "data"},
+#endif
+			// TODO: Corridor 7 isn't unpacked
+			//{FileSys::APP_Corridor7, PATH_SEPARATOR "cd"},
+			{FileSys::APP_OperationBodyCount, PATH_SEPARATOR "C" PATH_SEPARATOR "BCCD"}
 		};
 		for(unsigned int i = 0;i < countof(gogDirs);++i)
 		{
@@ -547,6 +751,16 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 	// Check requirements now as opposed to with LookForGameData so that reqs
 	// don't get loaded multiple times.
 	CheckForExpansionRequirements(basefiles);
+
+	// Now search for any applicable level sets
+	CheckForLevelSets(basefiles);
+
+	// Remove hidden options
+	for(unsigned int i = basefiles.Size();i-- > 0;)
+	{
+		if(basefiles[i].Hidden)
+			basefiles.Delete(i);
+	}
 
 	if(basefiles.Size() == 0)
 	{
@@ -582,27 +796,44 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 			pick = 0;
 	}
 	if(pick < 0)
-		Quit("");
+		Quit();
 
 	config.GetSetting("DefaultIWad")->SetValue(pick);
 
 	WadStuff &base = basefiles[pick];
 	selectedGame = &iwadTypes[base.Type];
 
-	if(!useProgdir)
-		wadfiles.Push(datawad);
-	else
-		wadfiles.Push(progdir + PATH_SEPARATOR + datawad);
+	wadfiles.Push(datawadDir + datawad);
 	for(unsigned int i = 0;i < base.Path.Size();++i)
 	{
 		wadfiles.Push(base.Path[i]);
 	}
-	if(!useProgdir)
-		wadfiles.Push("noah3d.wad");
-	else
-		wadfiles.Push(progdir + "/noah3d.wad");
+	wadfiles.Push(datawadDir + "noah3d.wad");
 
 	NumIWads = base.Path.Size();
+
+	// Load in config autoloads
+	FString autoloadkey = FString("Autoload") + selectedGame->Autoname;
+	for(long dot = 0, dotterm;dot < (long)autoloadkey.Len();dot = dotterm+1)
+	{
+		dotterm = autoloadkey.IndexOf('.', dot);
+		if(dotterm == -1)
+			dotterm = (long)autoloadkey.Len();
+
+		FString autoload = autoloadkey.Mid(0, dotterm);
+		autoload.StripChars('.');
+		config.CreateSetting(autoload, "");
+		autoload = config.GetSetting(autoload)->GetString();
+		for(long i = 0, term;i < (long)autoload.Len();i = term+1)
+		{
+			term = autoload.IndexOf(';', i);
+			if(term == -1)
+				term = (long)autoload.Len();
+
+			FString fname = autoload.Mid(i, term-i);
+			wadfiles.Push(fname);
+		}
+	}
 }
 
 }

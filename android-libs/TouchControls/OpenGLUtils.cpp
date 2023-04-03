@@ -1,4 +1,5 @@
 #include "OpenGLUtils.h"
+#include <EGL/egl.h>
 #include <map>
 
 namespace touchcontrols
@@ -287,6 +288,7 @@ void drawRect(GLfloat r,GLfloat g,GLfloat b,GLfloat a, float x, float y, GLRect 
 #else
 void drawRect(GLfloat r,GLfloat g,GLfloat b,GLfloat a, float x, float y, GLRect &rect)
 {
+	glBindTexture(GL_TEXTURE_2D, 0);
 	glDisable(GL_TEXTURE_2D);
 	glColor4f(r, g, b, a );
 
@@ -378,9 +380,14 @@ GLuint loadTextureFromPNG(std::string filename, int &width, int &height)
 	std::map<std::string, GLuint>::iterator it = tc_gl_textures.find(filename);
 	if(it != tc_gl_textures.end())
 	{
-	   //element found;
-	   LOGTOUCH("PNG %s is already loaded", filename.c_str());
-	   return it->second;
+		// If there's no context then always return the cached entry since
+		// glIsTexture will fail.
+		if(eglGetCurrentContext() == EGL_NO_CONTEXT || glIsTexture(it->second))
+		{
+			//element found;
+			LOGTOUCH("PNG %s is already loaded", filename.c_str());
+			return it->second;
+		}
 	}
 
 	std::string full_file = graphicsBasePath + filename + ".png";

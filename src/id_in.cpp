@@ -25,6 +25,7 @@
 #include "id_vl.h"
 #include "id_vh.h"
 #include "config.h"
+#include "wl_net.h"
 #include "wl_play.h"
 
 
@@ -73,13 +74,12 @@ void I_CheckKeyMods();
 // configuration variables
 //
 bool MousePresent;
-
+bool MouseWheel[4];
 
 // 	Global variables
-volatile bool		Keyboard[SDL_NUM_SCANCODES];
-volatile unsigned short Paused;
-volatile char		LastASCII;
-volatile ScanCode	LastScan;
+bool Keyboard[SDL_NUM_SCANCODES];
+char LastASCII;
+ScanCode LastScan;
 
 static KeyboardDef KbdDefs = {
 	sc_Control,             // button0
@@ -241,7 +241,7 @@ int IN_JoyButtons()
 				// Attempt to allow controllers using the game controller API
 				// to enter the menu.
 				if(i == SDL_CONTROLLER_BUTTON_START)
-					buttonstate[bt_esc] = true;
+					control[ConsolePlayer].buttonstate[bt_esc] = true;
 				else
 					res |= 1<<i;
 			}
@@ -330,7 +330,7 @@ static void processEvent(SDL_Event *event)
 	{
 		// exit if the window is closed
 		case SDL_QUIT:
-			Quit(NULL);
+			Quit();
 
 		// ASCII (Unicode) text entry for saves and stuff like that.
 #if SDL_VERSION_ATLEAST(1,3,0)
@@ -353,6 +353,10 @@ static void processEvent(SDL_Event *event)
 
 #if SDL_VERSION_ATLEAST(1,3,0)
 			LastScan = event->key.keysym.scancode;
+
+			// Android back button should be treated as escape for now
+			if(LastScan == SDL_SCANCODE_AC_BACK)
+				LastScan = SDL_SCANCODE_ESCAPE;
 #else
 			LastScan = event->key.keysym.sym;
 #endif
@@ -360,7 +364,7 @@ static void processEvent(SDL_Event *event)
 			if(Keyboard[sc_Alt])
 			{
 				if(LastScan==SDLx_SCANCODE(F4))
-					Quit(NULL);
+					Quit();
 			}
 
 			if(LastScan == SDLx_SCANCODE(KP_ENTER)) LastScan = SDLx_SCANCODE(RETURN);
@@ -427,8 +431,6 @@ static void processEvent(SDL_Event *event)
 
 			if(LastScan<SDL_NUM_SCANCODES)
 				Keyboard[LastScan] = 1;
-			if(LastScan == SDLx_SCANCODE(PAUSE))
-				Paused |= 1;
 			break;
 		}
 
@@ -470,6 +472,31 @@ static void processEvent(SDL_Event *event)
 			break;
 		}
 
+#if SDL_VERSION_ATLEAST(2,0,0)
+		case SDL_MOUSEWHEEL:
+		{
+			if(event->wheel.x > 0)
+				MouseWheel[di_west] = true;
+			else if(event->wheel.x < 0)
+				MouseWheel[di_east] = true;
+			if(event->wheel.y > 0)
+				MouseWheel[di_north] = true;
+			else if(event->wheel.y < 0)
+				MouseWheel[di_south] = true;
+			break;
+		}
+#else
+		case SDL_MOUSEBUTTONDOWN:
+		case SDL_MOUSEBUTTONUP:
+		{
+			if(event->button.button == SDL_BUTTON_WHEELUP)
+				MouseWheel[di_north] = true;
+			if(event->button.button == SDL_BUTTON_WHEELDOWN)
+				MouseWheel[di_south] = true;
+			break;
+		}
+#endif
+
 #if !SDL_VERSION_ATLEAST(1,3,0)
 		case SDL_ACTIVEEVENT:
 		{
@@ -502,7 +529,22 @@ static void processEvent(SDL_Event *event)
 void IN_WaitAndProcessEvents()
 {
 	SDL_Event event;
-	if(!SDL_WaitEvent(&event)) return;
+
+	if(Net::InitVars.mode == Net::MODE_SinglePlayer)
+	{
+		if(!SDL_WaitEvent(&event)) return;
+	}
+	else
+	{
+		// In net games we need to periodically return to process network packets
+#if SDL_VERSION_ATLEAST(2,0,0)
+		if(!SDL_WaitEventTimeout(&event, 10)) return;
+#else
+		SDL_Delay(1);
+		if(!SDL_PollEvent(&event)) return;
+#endif
+	}
+
 	do
 	{
 		processEvent(&event);
@@ -583,7 +625,7 @@ IN_Startup(void)
 				JoyNumAxes = SDL_JoystickNumAxes(Joystick);
 				JoyNumHats = SDL_JoystickNumHats(Joystick);
 				if(param_joystickhat >= JoyNumHats)
-					Quit("The joystickhat param must be between 0 and %i!", JoyNumHats - 1);
+					I_FatalError("The joystickhat param must be between 0 and %i!", JoyNumHats - 1);
 				else if(param_joystickhat < 0 && JoyNumHats > 0) // Default to hat 0
 					param_joystickhat = 0;
 
@@ -661,6 +703,22 @@ IN_ClearKeysDown(void)
 	LastScan = sc_None;
 	LastASCII = key_None;
 	memset ((void *) Keyboard,0,sizeof(Keyboard));
+
+	// Clear the wheel too since although we want to be able to acknowledge it
+	// separately since there's no key up state, we still generally think of it
+	// as a key.
+	IN_ClearWheel();
+}
+
+///////////////////////////////////////////////////////////////////////////
+//
+//	IN_ClearKeysDown() - Clears only mouse wheel state
+//
+///////////////////////////////////////////////////////////////////////////
+void
+IN_ClearWheel()
+{
+	memset ((void *) MouseWheel,0,sizeof(MouseWheel));
 }
 
 
@@ -764,8 +822,10 @@ IN_WaitForASCII(void)
 
 bool	btnstate[NUMBUTTONS];
 
-void IN_StartAck(void)
+void IN_StartAck(AckType type)
 {
+	Net::StartAck(type);
+
 	IN_ProcessEvents();
 //
 // get initial state of everything
@@ -791,7 +851,7 @@ bool IN_CheckAck (void)
 // see if something has been pressed
 //
 	if(LastScan)
-		return true;
+		return Net::CheckAck(true);
 
 	int buttons = IN_JoyButtons() << 4;
 
@@ -815,20 +875,20 @@ bool IN_CheckAck (void)
 				}
 				while(buttons & (1 << i));
 
-				return true;
+				return Net::CheckAck(true);
 			}
 		}
 		else
 			btnstate[i] = false;
 	}
 
-	return false;
+	return Net::CheckAck(false);
 }
 
 
-void IN_Ack (void)
+void IN_Ack (AckType type)
 {
-	IN_StartAck ();
+	IN_StartAck (type);
 
 	do
 	{
@@ -846,12 +906,12 @@ void IN_Ack (void)
 //		button up.
 //
 ///////////////////////////////////////////////////////////////////////////
-bool IN_UserInput(longword delay)
+bool IN_UserInput(longword delay, AckType type)
 {
 	longword	lasttime;
 
 	lasttime = GetTimeCount();
-	IN_StartAck ();
+	IN_StartAck (type);
 	do
 	{
 		IN_ProcessEvents();

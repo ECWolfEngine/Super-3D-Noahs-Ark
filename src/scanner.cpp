@@ -28,12 +28,45 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
-#include <cstdarg>
+/* On QNX/Blackberry cstdarg is broken, on the other hand stdarg.h is
+   universal, hence let's use stdarg.h.  */
+#include <stdarg.h>
 
 #include "scanner_support.h"
 #include "scanner.h"
+#include "w_wad.h"
 
-void (*Scanner::messageHander)(MessageLevel, const char*, va_list) = NULL;
+static void DefaultMessageHandler(Scanner::MessageLevel, const char* error, va_list list)
+{
+	vfprintf(stderr, error, list);
+}
+
+static void (*ScriptMessageHandler)(Scanner::MessageLevel, const char*, va_list) = DefaultMessageHandler;
+static void DoScriptMessage(const Scanner::Position &pos, Scanner::MessageLevel level, const char* error, va_list args)
+{
+	const char* messageLevel;
+	switch(level)
+	{
+		default:
+			messageLevel = "Notice";
+			break;
+		case Scanner::WARNING:
+			messageLevel = "Warning";
+			break;
+		case Scanner::ERROR:
+			messageLevel = "Error";
+			break;
+	}
+
+	size_t newMessageSize = strlen(error) + SCString_Len(pos.scriptIdentifier) + 25;
+	char* newMessage = new char[newMessageSize];
+	mysnprintf(newMessage, newMessageSize, "%s:%d:%d:%s: %s\n", SCString_GetChars(pos.scriptIdentifier), pos.tokenLine, pos.tokenLinePosition, messageLevel, error);
+	ScriptMessageHandler(level, newMessage, args);
+	delete[] newMessage;
+
+	if(ScriptMessageHandler == DefaultMessageHandler && level == Scanner::ERROR)
+		exit(0);
+}
 
 static const char* const TokenNames[TK_NumSpecialTokens] =
 {
@@ -68,7 +101,25 @@ static const char* const TokenNames[TK_NumSpecialTokens] =
 	"Ellipsis"
 };
 
-Scanner::Scanner(const char* data, size_t length) : line(1), lineStart(0), logicalPosition(0), scanPos(0), needNext(true)
+Scanner::Scanner(int lumpNum)
+: line(1), lineStart(0), logicalPosition(0), scanPos(0), needNext(true)
+{
+	FMemLump lump = Wads.ReadLump(lumpNum);
+	length = lump.GetSize();
+	this->data = new char[length];
+	memcpy(this->data, lump.GetMem(), length);
+
+	SetScriptIdentifier(Wads.GetLumpFullPath(lumpNum));
+
+	CheckForWhitespace();
+
+	state.scanPos = scanPos;
+	state.tokenLine = 0;
+	state.tokenLinePosition = 0;
+}
+
+Scanner::Scanner(const char* data, size_t length)
+: line(1), lineStart(0), logicalPosition(0), scanPos(0), needNext(true)
 {
 	if(length == 0 && *data != 0)
 		length = strlen(data);
@@ -608,7 +659,7 @@ void Scanner::MustGetToken(char token)
 	if(!CheckToken(token))
 	{
 		ExpandState();
-		if(state.token == TK_NoToken)
+		if(state.token == static_cast<char>(TK_NoToken))
 			ScriptMessage(Scanner::ERROR, "Unexpected end of script.");
 		else if(token < TK_NumSpecialTokens && state.token < TK_NumSpecialTokens)
 			ScriptMessage(Scanner::ERROR, "Expected '%s' but got '%s' instead.", TokenNames[(int)token], TokenNames[(int)state.token]);
@@ -634,38 +685,28 @@ void Scanner::Rewind()
 
 void Scanner::ScriptMessage(MessageLevel level, const char* error, ...) const
 {
-	const char* messageLevel;
-	switch(level)
-	{
-		default:
-			messageLevel = "Notice";
-			break;
-		case WARNING:
-			messageLevel = "Warning";
-			break;
-		case ERROR:
-			messageLevel = "Error";
-			break;
-	}
-
-	char* newMessage = new char[strlen(error) + SCString_Len(scriptIdentifier) + 25];
-	sprintf(newMessage, "%s:%d:%d:%s: %s\n", SCString_GetChars(scriptIdentifier), GetLine(), GetLinePos(), messageLevel, error);
 	va_list list;
 	va_start(list, error);
-	if(messageHander)
-		messageHander(level, newMessage, list);
-	else
-		vfprintf(stderr, newMessage, list);
+	DoScriptMessage(GetPosition(), level, error, list);
 	va_end(list);
-	delete[] newMessage;
+}
 
-	if(!messageHander && level == ERROR)
-		exit(0);
+void Scanner::Position::ScriptMessage(MessageLevel level, const char* error, ...) const
+{
+	va_list list;
+	va_start(list, error);
+	DoScriptMessage(*this, level, error, list);
+	va_end(list);
+}
+
+void Scanner::SetMessageHandler(void (*handler)(MessageLevel, const char*, va_list))
+{
+	ScriptMessageHandler = handler;
 }
 
 int Scanner::SkipLine()
 {
-	int ret = GetPos();
+	int ret = GetLogicalPos();
 	while(logicalPosition < length)
 	{
 		char thisChar = data[logicalPosition];
