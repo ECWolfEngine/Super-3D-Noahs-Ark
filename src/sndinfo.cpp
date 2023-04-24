@@ -229,6 +229,22 @@ int SoundInformation::GetMusicLumpNum(FString song) const
 	if(alias && wad <= alias->WadNum)
 		return GetMusicLumpNum(alias->Name);
 
+	// Noah3D - Hack music selection to bypass SC-55 pack if Adlib is selected
+	if(MusicMode == smm_AdLib && stricmp(Wads.GetWadName(wad), "noah3d.wad") == 0)
+	{
+		int otherLump;
+		int lastLump = 0;
+		int candidateLump = lump; // If nothing is found then use it anyway
+		while((otherLump = Wads.FindLump(song, &lastLump, true)) != -1)
+		{
+			if(Wads.GetLumpNamespace(otherLump) != ns_music)
+				continue;
+			if(otherLump != lump)
+				candidateLump = otherLump;
+		}
+		return candidateLump;
+	}
+
 	return lump;
 }
 

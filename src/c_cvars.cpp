@@ -172,6 +172,13 @@ void ReadConfig(void)
 	int uniScreenWidth = 0, uniScreenHeight = 0;
 	SettingsData * sd = NULL;
 
+	// Noah3D - Force music to smm_Midi if we detect an old 1.3 config
+	if(!config.GetSetting("N3DTempoEmulation"))
+	{
+		if(SettingsData* mm = config.GetSetting("MusicDevice"))
+			mm->SetValue(smm_Midi);
+	}
+
 #if defined(_WIN32) || defined(__APPLE__)
 	config.CreateSetting("ForceGrabMouse", false);
 #else
@@ -185,7 +192,8 @@ void ReadConfig(void)
 	config.CreateSetting("PanXAdjustment", 5);
 	config.CreateSetting("PanYAdjustment", 5);
 	config.CreateSetting("SoundDevice", sdm_AdLib);
-	config.CreateSetting("MusicDevice", smm_AdLib);
+	// Noah3D - Switch default to smm_Midi so smm_AdLib can use classic music
+	config.CreateSetting("MusicDevice", smm_Midi);
 	config.CreateSetting("DigitalSoundDevice", sds_SoundBlaster);
 	config.CreateSetting("N3DTempoEmulation", false);
 	config.CreateSetting("AlwaysRun", 0);
